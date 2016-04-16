@@ -71,9 +71,18 @@ class AtlasViewer(QtGui.QWidget):
             'anterior': ('anterior', 'right', 'dorsal')
         }[axis]
         order = [self.atlas._interpretAxis(ax) for ax in axes]
+
+        # transpose, flip, downsample images
+        ds = self.displayCtrl.params['Downsample']
         self.displayAtlas = self.atlas.view(np.ndarray).transpose(order)
-        self.displayLabel = self.label.view(np.ndarray).transpose(order)
-        self.view.setData(self.displayAtlas, self.displayLabel, scale=self.atlas._info[-1]['vxsize'])
+        with pg.BusyCursor():
+            for ax in (0, 1, 2):
+                self.displayAtlas = pg.downsample(self.displayAtlas, ds, axis=ax)
+        self.displayLabel = self.label.view(np.ndarray).transpose(order)[::ds, ::ds, ::ds]
+
+        # make sure atlas/label have the same size after downsampling
+
+        self.view.setData(self.displayAtlas, self.displayLabel, scale=self.atlas._info[-1]['vxsize']*ds)
 
     def labelsChanged(self):
         lut = self.labelTree.lookupTable()
@@ -85,8 +94,6 @@ class AtlasViewer(QtGui.QWidget):
                 self.view.setOverlay(value == 'Overlay')
             elif param.name() == 'Opacity':
                 self.view.setLabelOpacity(value)
-            elif param.name() == 'Downsample':
-                self.view.setDownsample(value)
         self.updateImage()
 
     def mouseHovered(self, id):
@@ -296,7 +303,6 @@ class VolumeSliceView(QtGui.QWidget):
     def __init__(self, parent=None):
         self.atlas = None
         self.label = None
-        self.downsample = 1
 
         QtGui.QWidget.__init__(self, parent)
         self.scale = None
@@ -356,9 +362,6 @@ class VolumeSliceView(QtGui.QWidget):
                 h1.movePoint([p1.x(), p1.y()])
                 h2.movePoint([p2.x(), p2.y()])
         
-        # update downsampled images
-        self.setDownsample(self.downsample, update=False)
-
         self.zslider.setMaximum(atlas.shape[0])
         self.zslider.setValue(atlas.shape[0]//2)
         self.updateImage(autoRange=True)
@@ -366,21 +369,10 @@ class VolumeSliceView(QtGui.QWidget):
         self.lut.setLevels(atlas.min(), atlas.max())
 
     def updateImage(self, autoRange=False):
-        z = self.zslider.value() // self.downsample
-        self.img1.setData(self.dsAtlas[z], self.dsLabel[z], scale=self.scale*self.downsample)
+        z = self.zslider.value()
+        self.img1.setData(self.atlas[z], self.label[z], scale=self.scale)
         if autoRange:
             self.view1.autoRange(items=[self.img1.atlasImg])
-
-    def setDownsample(self, ds, update=True):
-        self.downsample = ds
-        if ds == 1:
-            self.dsAtlas = self.atlas
-            self.dsLabel = self.label
-        else:
-            self.dsAtlas = pg.downsample(self.atlas, (ds, ds, ds))
-            self.dsLabel = self.label[::ds, ::ds, ::ds]
-        if update:
-            self.updateImage()
 
     def setLabelLUT(self, lut):
         self.img1.setLUT(lut)
@@ -389,11 +381,11 @@ class VolumeSliceView(QtGui.QWidget):
     def updateSlice(self):
         if self.atlas is None:
             return
-        atlas = self.roi.getArrayRegion(self.dsAtlas, self.img1.atlasImg, axes=(1,2))
-        label = self.roi.getArrayRegion(self.dsLabel, self.img1.atlasImg, axes=(1,2), order=0)
+        atlas = self.roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1,2))
+        label = self.roi.getArrayRegion(self.label, self.img1.atlasImg, axes=(1,2), order=0)
         if atlas.size == 0:
             return
-        self.img2.setData(atlas, label, scale=self.scale*self.downsample)
+        self.img2.setData(atlas, label, scale=self.scale)
         self.view2.autoRange(items=[self.img2.atlasImg])
         self.w1.viewport().repaint()  # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
@@ -631,6 +623,7 @@ if __name__ == '__main__':
     app = pg.mkQApp()
 
     v = AtlasViewer()
+    v.show()
 
     path = os.path.dirname(__file__)
     atlasFile = os.path.join(path, "ccf.ma")
@@ -650,7 +643,6 @@ if __name__ == '__main__':
 
     v.setAtlas(atlas)
     v.setLabels(label)
-    v.show()
 
     if sys.flags.interactive == 0:
         app.exec_()
