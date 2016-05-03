@@ -89,12 +89,16 @@ class AtlasViewer(QtGui.QWidget):
         self.view.setLabelLUT(lut)        
         
     def displayCtrlChanged(self, param, changes):
+        update = False
         for param, change, value in changes:
             if param.name() == 'Composition':
-                self.view.setOverlay(value == 'Overlay')
+                self.view.setOverlay(value)
             elif param.name() == 'Opacity':
                 self.view.setLabelOpacity(value)
-        self.updateImage()
+            else:
+                update = True
+        if update:
+            self.updateImage()
 
     def mouseHovered(self, id):
         self.statusLabel.setText(self.labelTree.describe(id))
@@ -106,7 +110,7 @@ class LabelDisplayCtrl(pg.parametertree.ParameterTree):
         params = [
             {'name': 'Orientation', 'type': 'list', 'values': ['right', 'anterior', 'dorsal']},
             {'name': 'Opacity', 'type': 'float', 'limits': [0, 1], 'value': 0.5, 'step': 0.1},
-            {'name': 'Composition', 'type': 'list', 'values': ['Overlay', 'SourceOver']},
+            {'name': 'Composition', 'type': 'list', 'values': ['Multiply', 'Overlay', 'SourceOver']},
             {'name': 'Downsample', 'type': 'int', 'value': 1, 'limits': [1, None], 'step': 1},
         ]
         self.params = pg.parametertree.Parameter(name='params', type='group', children=params)
@@ -424,7 +428,7 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
         self.labelImg.setParentItem(self)
         self.labelImg.setZValue(10)
         self.labelImg.setOpacity(0.5)
-        self.setOverlay(True)
+        self.setOverlay('Multiply')
        
         self.labelColors = {}
         self.setAcceptHoverEvents(True)
@@ -442,10 +446,8 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
         self.labelImg.setLookupTable(lut)
 
     def setOverlay(self, overlay):
-        if overlay:
-            self.labelImg.setCompositionMode(QtGui.QPainter.CompositionMode_Overlay)
-        else:
-            self.labelImg.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+        mode = getattr(QtGui.QPainter, 'CompositionMode_' + overlay)
+        self.labelImg.setCompositionMode(mode)
 
     def setLabelOpacity(self, o):
         self.labelImg.setOpacity(o)
