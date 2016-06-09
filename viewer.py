@@ -244,62 +244,6 @@ class LabelTree(QtGui.QWidget):
         return ' > '.join(descr) + "  :  " + name
 
 
-class VolumeView(QtGui.QSplitter):
-    # 3 orthogonal views
-    def __init__(self, parent=None):
-        QtGui.QWidget.__init__(self, parent)
-        self.scale = None
-        # anterior, dorsal, right
-        self.axes = [(2, 1), (0, 1), (2, 0)]
-
-        self.widgets = []
-        self.views = []
-        self.images = []
-        self.lines = []
-        for i in range(3):
-            w = pg.GraphicsLayoutWidget()
-            v = w.addViewBox()
-            v.invertY(False)
-            self.addWidget(w)
-            self.widgets.append(w)
-            self.views.append(v)
-            img = LabelImageItem()
-            v.addItem(img)
-            self.images.append(img)
-            l1 = pg.InfiniteLine(angle=0)
-            l2 = pg.InfiniteLine(angle=90)
-            v.addItem(l1)
-            v.addItem(l2)
-            l1.axis = i, 0
-            l2.axis = i, 1
-            self.lines.append((l1, l2))
-            l1.sigValueChanging.connect(self.lineMoved)
-            l2.sigValueChanging.connect(self.lineMoved)
-
-    def setData(self, atlas, label, scale):
-        self.atlas = atlas
-        self.label = label
-        self.scale = scale
-
-        # re-center lines:
-        for ax in range(3):
-            l1, l2 = self.lines[ax]
-            with pg.SignalBlocker(l1.sigValueChanging, self.lineMoved):
-                l1.setValue(atlas.shape[self.axes[ax][0]] * 0.5 * scale)
-            with pg.SignalBlocker(l2.sigValueChanging, self.lineMoved):
-                l2.setValue(atlas.shape[self.axes[ax][1]] * 0.5 * scale)
-
-        self.updateImages()
-
-    def lineMoved(self, line):
-        print line
-
-    def updateImages(self):
-        for i in range(3):
-            ax = self.axes[i]
-            self.images[i]
-
-
 class VolumeSliceView(QtGui.QWidget):
     
     mouseHovered = QtCore.Signal(object)
