@@ -27,6 +27,11 @@ The viewer requires three pieces of data that can be downloaded from the Allen I
 * Label data: http://download.alleninstitute.org/informatics-archive/current-release/mouse_ccf/annotation/ccf_2015/
 * Ontology: http://api.brain-map.org/api/v2/structure_graph_download/1.json
 
+More information about the atlas data and ontology files is available at:
+* http://help.brain-map.org/display/mouseconnectivity/API#API-DownloadAtlas
+* http://help.brain-map.org/display/api/Downloading+an+Ontology%27s+Structure+Graph
+* http://help.brain-map.org/display/api/Atlas+Drawings+and+Ontologies#AtlasDrawingsandOntologies-StructuresAndOntologies
+
 Start the viewer from the command prompt:
 
   $ python viewer.py
