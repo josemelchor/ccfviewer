@@ -34,7 +34,9 @@ More information about the atlas data and ontology files is available at:
 
 Start the viewer from the command prompt:
 
-  $ python viewer.py
+```
+$ python viewer.py
+```
 
 The first time the viewer runs, it will ask for the location of the three files listed above.
 Data is then converted into a format that is more memory- and processor-efficient; this process can take
