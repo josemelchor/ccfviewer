@@ -51,7 +51,7 @@ class AtlasViewer(QtGui.QWidget):
 
     def setLabels(self, label):
         self.label = label
-        with pg.SignalBlock(self.labelTree.labelsChanged, self.labelsChanged):
+        with SignalBlock(self.labelTree.labelsChanged, self.labelsChanged):
             for rec in label._info[-1]['ontology']:
                 self.labelTree.addLabel(*rec)
         self.updateImage()
@@ -102,6 +102,32 @@ class AtlasViewer(QtGui.QWidget):
 
     def mouseHovered(self, id):
         self.statusLabel.setText(self.labelTree.describe(id))
+        
+    def renderVolume(self):
+        import pyqtgraph.opengl as pgl
+        import scipy.ndimage as ndi
+        self.glView = pgl.GLViewWidget()
+        img = np.ascontiguousarray(self.displayAtlas[::8,::8,::8])
+        
+        # render volume
+        #vol = np.empty(img.shape + (4,), dtype='ubyte')
+        #vol[:] = img[..., None]
+        #vol = np.ascontiguousarray(vol.transpose(1, 2, 0, 3))
+        #vi = pgl.GLVolumeItem(vol)
+        #self.glView.addItem(vi)
+        #vi.translate(-vol.shape[0]/2., -vol.shape[1]/2., -vol.shape[2]/2.)
+        
+        verts, faces = pg.isosurface(ndi.gaussian_filter(img.astype('float32'), (2, 2, 2)), 5.0)
+        md = pgl.MeshData(vertexes=verts, faces=faces)
+        mesh = pgl.GLMeshItem(meshdata=md, smooth=True, color=[0.5, 0.5, 0.5, 0.2], shader='balloon')
+        mesh.setGLOptions('additive')
+        mesh.translate(-img.shape[0]/2., -img.shape[1]/2., -img.shape[2]/2.)
+        self.glView.addItem(mesh)
+
+        self.glView.show()
+
+
+   
 
 
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
@@ -172,7 +198,7 @@ class LabelTree(QtGui.QWidget):
 
     def itemChange(self, item, col):
         checked = item.checkState(0) == QtCore.Qt.Checked
-        with pg.SignalBlock(self.tree.itemChanged, self.itemChange):
+        with SignalBlock(self.tree.itemChanged, self.itemChange):
             self.checkRecursive(item, checked)
         self.labelsChanged.emit()
         
@@ -301,7 +327,7 @@ class VolumeSliceView(QtGui.QWidget):
             self.scale = scale
 
             # reset ROI position
-            with pg.SignalBlock(self.roi.sigRegionChanged, self.updateSlice):
+            with SignalBlock(self.roi.sigRegionChanged, self.updateSlice):
                 h1, h2 = self.roi.getHandles()
                 p1 = self.view1.mapViewToScene(pg.Point(0, 0))
                 if scale is None:
@@ -366,7 +392,7 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
         self.mouseHovered = self._sigprox.mouseHovered
         
         QtGui.QGraphicsItemGroup.__init__(self)
-        self.atlasImg = pg.ImageItem()
+        self.atlasImg = pg.ImageItem(levels=[0,1])
         self.labelImg = pg.ImageItem()
         self.atlasImg.setParentItem(self)
         self.labelImg.setParentItem(self)
@@ -509,6 +535,8 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
       http://help.brain-map.org/display/api/Downloading+an+Ontology%27s+Structure+Graph
       http://help.brain-map.org/display/api/Atlas+Drawings+and+Ontologies#AtlasDrawingsandOntologies-StructuresAndOntologies
 
+    This method compresses the annotation data down to a 16-bit array by remapping
+    the larger annotations to smaller, unused values.
     """
     global onto, ontology, data, mapping, inds, vxsize, info, ma
     
@@ -519,33 +547,51 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
     if ontologyFile is None:
         ontoFile = QtGui.QFileDialog.getOpenFileName(None, "Select ontology file (json)")
 
-    # Read ontology and convert to flat table
-    onto = json.load(open(ontoFile, 'rb'))
-    onto = parseOntology(onto['msg'][0])
-    l1 = max([len(row[2]) for row in onto])
-    l2 = max([len(row[3]) for row in onto])
-    ontology = np.array(onto, dtype=[('id', 'int32'), ('parent', 'int32'), ('name', 'S%d'%l1), ('acronym', 'S%d'%l2), ('color', 'S6')])    
+    with pg.ProgressDialog("Loading annotation file...", 0, 5, wait=0) as dlg:
+        print "Loading annotation file..."
+        app.processEvents()
+        # Read ontology and convert to flat table
+        onto = json.load(open(ontoFile, 'rb'))
+        onto = parseOntology(onto['msg'][0])
+        l1 = max([len(row[2]) for row in onto])
+        l2 = max([len(row[3]) for row in onto])
+        ontology = np.array(onto, dtype=[('id', 'int32'), ('parent', 'int32'), ('name', 'S%d'%l1), ('acronym', 'S%d'%l2), ('color', 'S6')])    
 
-    # read annotation data
-    with pg.BusyCursor():
+        if dlg.wasCanceled():
+            return
+        dlg += 1
+
+        # read annotation data
         data, header = nrrd.read(nrrdFile)
 
-    # data must have axes (anterior, dorsal, right)
-    # rearrange axes to fit -- CCF data comes in (posterior, inferior, right) order.
-    data = data[::-1, ::-1, :]
+        if dlg.wasCanceled():
+            return
+        dlg += 1
+
+        # data must have axes (anterior, dorsal, right)
+        # rearrange axes to fit -- CCF data comes in (posterior, inferior, right) order.
+        data = data[::-1, ::-1, :]
+
+        if dlg.wasCanceled():
+            return
+        dlg += 1
 
     # compress down to uint16
     print "Compressing.."
     u = np.unique(data)
+    
+    # decide on a 32-to-64-bit label mapping
+    mask = u <= 2**16-1
     next_id = 2**16-1
     mapping = OrderedDict()
     inds = set()
-    for i in u[u<=2**16-1]:
+    for i in u[mask]:
         mapping[i] = i
         inds.add(i)
    
-    with pg.ProgressDialog("Remapping annotations to 16-bit...", 0, (u>2**16-1).sum()) as dlg:
-        for i in u[u>2**16-1]:
+    with pg.ProgressDialog("Remapping annotations to 16-bit...", 0, (~mask).sum(), wait=0) as dlg:
+        app.processEvents()
+        for i in u[~mask]:
             while next_id in inds:
                 next_id -= 1
             mapping[i] = next_id
@@ -553,7 +599,10 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
             data[data == i] = next_id
             ontology['id'][ontology['id'] == i] = next_id
             ontology['parent'][ontology['parent'] == i] = next_id
-        dlg += 1
+            if dlg.wasCanceled():
+                return
+            dlg += 1
+        
     data = data.astype('uint16')
     mapping = np.array(list(mapping.items()))    
     
@@ -580,9 +629,51 @@ def parseOntology(root, parent=-1):
 
 def writeFile(data, file, **kwds):
     dataDir = os.path.dirname(file)
-    if not os.path.exists(dataDir):
+    if dataDir != '' and not os.path.exists(dataDir):
         os.makedirs(dataDir)
     data.write(file, **kwds)
+
+
+
+
+####### Stolen from ACQ4; not in mainline pyqtgraph yet #########
+
+def disconnect(signal, slot):
+    """Disconnect a Qt signal from a slot.
+
+    This method augments Qt's Signal.disconnect():
+
+    * Return bool indicating whether disconnection was successful, rather than
+      raising an exception
+    * Attempt to disconnect prior versions of the slot when using pg.reload    
+    """
+    while True:
+        try:
+            signal.disconnect(slot)
+            return True
+        except TypeError, RuntimeError:
+            slot = getPreviousVersion(slot)
+            if slot is None:
+                return False
+
+class SignalBlock(object):
+    """Class used to temporarily block a Qt signal connection::
+
+        with SignalBlock(signal, slot):
+            # do something that emits a signal; it will
+            # not be delivered to slot
+    """
+    def __init__(self, signal, slot):
+        self.signal = signal
+        self.slot = slot
+
+    def __enter__(self):
+        disconnect(self.signal, self.slot)
+        return self
+
+    def __exit__(self, *args):
+        self.signal.connect(self.slot)
+
 
 
 if __name__ == '__main__':
