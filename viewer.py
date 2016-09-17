@@ -468,27 +468,6 @@ class RulerROI(pg.LineSegmentROI):
         pxw = 50 * self.pixelLength(pg.Point([1, 0]))
         return r.adjusted(-50, -50, 50, 50)
 
-    def getArrayRegion(self, data, img, axes=(0,1), order=1):
-        """
-        Use the position of this ROI relative to an imageItem to pull a slice 
-        from an array.
-        
-        Since this pulls 1D data from a 2D coordinate system, the return value 
-        will have ndim = data.ndim-1
-        
-        See ROI.getArrayRegion() for a description of the arguments.
-        """
-        
-        imgPts = [self.mapToItem(img, h['item'].pos()) for h in self.handles]
-        rgns = []
-        for i in range(len(imgPts)-1):
-            d = pg.Point(imgPts[i+1] - imgPts[i])
-            o = pg.Point(imgPts[i])
-            r = pg.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes, order=order)
-            rgns.append(r)
-            
-        return np.concatenate(rgns, axis=axes[0])
-
 
 def readNRRDAtlas(nrrdFile=None):
     """
