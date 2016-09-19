@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, traceback
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 
 import json
@@ -13,6 +13,7 @@ class AtlasBuilder(QtGui.QMainWindow):
     def __init__(self):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
+
 
 class AtlasViewer(QtGui.QWidget):
     def __init__(self, parent=None):
@@ -30,11 +31,16 @@ class AtlasViewer(QtGui.QWidget):
 
         self.view = VolumeSliceView()
         self.view.mouseHovered.connect(self.mouseHovered)
+        self.view.mouseClicked.connect(self.mouseClicked)
         self.splitter.addWidget(self.view)
         
         self.statusLabel = QtGui.QLabel()
         self.layout.addWidget(self.statusLabel, 1, 0, 1, 1)
         self.statusLabel.setFixedHeight(30)
+
+        self.pointLabel = QtGui.QLabel()
+        self.layout.addWidget(self.pointLabel, 2, 0, 1, 1)
+        self.pointLabel.setFixedHeight(30)
 
         self.ctrl = QtGui.QWidget(parent=self)
         self.splitter.addWidget(self.ctrl)
@@ -125,9 +131,55 @@ class AtlasViewer(QtGui.QWidget):
         self.glView.addItem(mesh)
 
         self.glView.show()
+        
+    def mouseClicked(self, params):
+        point, to_clipboard = self.getCcfPoint(params)
+        self.pointLabel.setText(point)
+        self.view.target.setVisible(True)
+        self.view.target.setPos(self.view.view2.mapSceneToView(params[3]))
+        self.view.clipboard.setText(to_clipboard)
 
+    # Get CCF point coordinate and Structure id
+    # Returns two strings. One used for display in a label and the other to put in the clipboard
+    # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right
+    def getCcfPoint(self, params):
 
-   
+        axis = self.displayCtrl.params['Orientation']
+        p1 = self.view.mappedCoords[0][int(params[1])]
+        p2 = self.view.mappedCoords[1][int(params[1])]
+        p3 = params[0]
+
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+
+        if p1 > self.view.atlas.shape[1] or p1 < 0:
+            p1 = 'N/A'
+        else:
+            p1 = abs(p1 - self.view.atlas.shape[1]) * vxsize
+
+        if p2 > self.view.atlas.shape[2] or p2 < 0:
+            p2 = 'N/A'
+        else:
+            p2 = abs(p2 - self.view.atlas.shape[2]) * vxsize
+
+        if p3 > self.view.atlas.shape[0] or p3 < 0:
+            p3 = 'N/A'
+        else:
+            p3 = abs(p3 - self.view.atlas.shape[0]) * vxsize
+
+        if axis == 'right':
+            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(params[2])
+            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(params[2])
+        elif axis == 'anterior':
+            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(params[2])
+            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(params[2])
+        elif axis == 'dorsal':
+            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(params[2])
+            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(params[2])
+        else:
+            point = 'N/A'
+            clipboard_text = 'NULL'
+
+        return point, clipboard_text
 
 
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
@@ -146,14 +198,14 @@ class LabelDisplayCtrl(pg.parametertree.ParameterTree):
 
 class LabelTree(QtGui.QWidget):
     labelsChanged = QtCore.Signal()
-    
+
     def __init__(self, parent=None):
         QtGui.QWidget.__init__(self, parent)
         self.layout = QtGui.QGridLayout()
         self.setLayout(self.layout)
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(0,0,0,0)
-        
+
         self.tree = QtGui.QTreeWidget(self)
         self.layout.addWidget(self.tree, 0, 0)
         self.tree.header().setResizeMode(QtGui.QHeaderView.ResizeToContents)
@@ -164,11 +216,11 @@ class LabelTree(QtGui.QWidget):
         self.labelsByAcronym = {}
         self.checked = set()
         self.tree.itemChanged.connect(self.itemChange)
-        
+
         self.layerBtn = QtGui.QPushButton('Color by cortical layer')
         self.layout.addWidget(self.layerBtn, 1, 0)
         self.layerBtn.clicked.connect(self.colorByLayer)
-        
+
         self.resetBtn = QtGui.QPushButton('Reset colors')
         self.layout.addWidget(self.resetBtn, 2, 0)
         self.resetBtn.clicked.connect(self.resetColors)
@@ -182,13 +234,13 @@ class LabelTree(QtGui.QWidget):
             root = self.labelsById[parent]['item']
         else:
             root = self.tree.invisibleRootItem()
-            
+
         root.addChild(item)
-        
+
         btn = pg.ColorButton(color=pg.mkColor(color))
         btn.defaultColor = color
         self.tree.setItemWidget(item, 2, btn)
-        
+
         self.labelsById[id] = {'item': item, 'btn': btn}
         item.id = id
         self.labelsByAcronym[acronym] = self.labelsById[id]
@@ -198,10 +250,10 @@ class LabelTree(QtGui.QWidget):
 
     def itemChange(self, item, col):
         checked = item.checkState(0) == QtCore.Qt.Checked
-        with SignalBlock(self.tree.itemChanged, self.itemChange):
+        with pg.SignalBlock(self.tree.itemChanged, self.itemChange):
             self.checkRecursive(item, checked)
         self.labelsChanged.emit()
-        
+
     def checkRecursive(self, item, checked):
         if checked:
             self.checked.add(item.id)
@@ -210,7 +262,7 @@ class LabelTree(QtGui.QWidget):
             if item.id in self.checked:
                 self.checked.remove(item.id)
             item.setCheckState(0, QtCore.Qt.Unchecked)
-        
+
         for i in range(item.childCount()):
             self.checkRecursive(item.child(i), checked)
 
@@ -224,7 +276,7 @@ class LabelTree(QtGui.QWidget):
                 continue
             lut[id] = self.labelsById[id]['btn'].color(mode='byte')
         return lut
-    
+
     def colorByLayer(self, root=None):
         try:
             unblock = False
@@ -232,7 +284,7 @@ class LabelTree(QtGui.QWidget):
                 self.blockSignals(True)
                 unblock = True
                 root = self.labelsByAcronym['Isocortex']['item']
-                
+
             name = str(root.text(1))
             if ', layer' in name.lower():
                 layer = name.split(' ')[-1]
@@ -240,7 +292,7 @@ class LabelTree(QtGui.QWidget):
                 btn = self.labelsById[root.id]['btn']
                 btn.setColor(pg.intColor(layer, 10))
                 #root.setCheckState(0, QtCore.Qt.Checked)
-                
+
             for i in range(root.childCount()):
                 self.colorByLayer(root.child(i))
         finally:
@@ -265,15 +317,16 @@ class LabelTree(QtGui.QWidget):
         item = self.labelsById[id]['item']
         name = str(item.text(1))
         while item is not self.labelsByAcronym['root']['item']:
-            descr.insert(0, str(item.text(0))) 
+            descr.insert(0, str(item.text(0)))
             item = item.parent()
         return ' > '.join(descr) + "  :  " + name
 
 
 class VolumeSliceView(QtGui.QWidget):
-    
+
     mouseHovered = QtCore.Signal(object)
-    
+    mouseClicked = QtCore.Signal(object)
+
     def __init__(self, parent=None):
         self.atlas = None
         self.label = None
@@ -301,8 +354,14 @@ class VolumeSliceView(QtGui.QWidget):
         self.img2 = LabelImageItem()
         self.img1.mouseHovered.connect(self.mouseHovered)
         self.img2.mouseHovered.connect(self.mouseHovered)
+        self.img2.mouseClicked.connect(self.mouseClicked)
         self.view1.addItem(self.img1)
         self.view2.addItem(self.img2)
+
+        self.target = Target()
+        self.target.setZValue(5000)
+        self.view2.addItem(self.target)
+        self.target.setVisible(False)
 
         self.roi = RulerROI([[10, 64], [120, 64]], pen='r')
         self.view1.addItem(self.roi, ignoreBounds=True)
@@ -317,6 +376,9 @@ class VolumeSliceView(QtGui.QWidget):
         self.lut.sigLookupTableChanged.connect(self.histlutChanged)
         self.lut.sigLevelsChanged.connect(self.histlutChanged)
         self.layout.addWidget(self.lut, 0, 1, 3, 1)
+
+        self.mappedCoords = None
+        self.clipboard = QtGui.QApplication.clipboard()
 
     def setData(self, atlas, label, scale=None):
         if np.isscalar(scale):
@@ -335,7 +397,7 @@ class VolumeSliceView(QtGui.QWidget):
                 p2 = self.view1.mapViewToScene(pg.Point(100*scale[0], 100*scale[1]))
                 h1.movePoint([p1.x(), p1.y()])
                 h2.movePoint([p2.x(), p2.y()])
-        
+
         self.zslider.setMaximum(atlas.shape[0])
         self.zslider.setValue(atlas.shape[0]//2)
         self.updateImage(autoRange=True)
@@ -355,12 +417,14 @@ class VolumeSliceView(QtGui.QWidget):
     def updateSlice(self):
         if self.atlas is None:
             return
-        atlas = self.roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1,2))
+        atlas = self.roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1,2), returnMappedCoords=True) 
+        self.mappedCoords = atlas[1]  # Original data points to map back to CCF
         label = self.roi.getArrayRegion(self.label, self.img1.atlasImg, axes=(1,2), order=0)
-        if atlas.size == 0:
+        if atlas[0].size == 0:
             return
-        self.img2.setData(atlas, label, scale=self.scale)
+        self.img2.setData(atlas[0], label, scale=self.scale)
         self.view2.autoRange(items=[self.img2.atlasImg])
+        self.target.setVisible(False)
         self.w1.viewport().repaint()  # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
 
@@ -377,7 +441,7 @@ class VolumeSliceView(QtGui.QWidget):
     def setOverlay(self, o):
         self.img1.setOverlay(o)
         self.img2.setOverlay(o)
-        
+
     def setLabelOpacity(self, o):
         self.img1.setLabelOpacity(o)
         self.img2.setLabelOpacity(o)
@@ -386,11 +450,13 @@ class VolumeSliceView(QtGui.QWidget):
 class LabelImageItem(QtGui.QGraphicsItemGroup):
     class SignalProxy(QtCore.QObject):
         mouseHovered = QtCore.Signal(object)  # id
+        mouseClicked = QtCore.Signal(object)  # id
 
     def __init__(self):
         self._sigprox = LabelImageItem.SignalProxy()
         self.mouseHovered = self._sigprox.mouseHovered
-        
+        self.mouseClicked = self._sigprox.mouseClicked
+
         QtGui.QGraphicsItemGroup.__init__(self)
         self.atlasImg = pg.ImageItem(levels=[0,1])
         self.labelImg = pg.ImageItem()
@@ -399,7 +465,7 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
         self.labelImg.setZValue(10)
         self.labelImg.setOpacity(0.5)
         self.setOverlay('Multiply')
-       
+
         self.labelColors = {}
         self.setAcceptHoverEvents(True)
 
@@ -424,22 +490,66 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
 
     def setLabelColors(self, colors):
         self.labelColors = colors
-        
+
     def hoverEvent(self, event):
         if event.isExit():
             return
-        
+
         try:
             id = self.labelData[int(event.pos().x()), int(event.pos().y())]
         except IndexError, AttributeError:
             return
         self.mouseHovered.emit(id)
-        
+
+    def mouseClickEvent(self, event):
+        id = self.labelData[int(event.pos().x()), int(event.pos().y())]
+        self.mouseClicked.emit([event.pos().x(), event.pos().y(), id, event.scenePos(), event.screenPos()])
+
     def boundingRect(self):
         return self.labelImg.boundingRect()
-    
+
     def shape(self):
         return self.labelImg.shape()
+
+
+class Target(pg.GraphicsObject):
+
+    def __init__(self, movable=True):
+        pg.GraphicsObject.__init__(self)
+        self._bounds = None
+        self.color = (255, 255, 0)
+
+    def boundingRect(self):
+        if self._bounds is None:
+            # too slow!
+            w = self.pixelLength(pg.Point(1, 0))
+            if w is None:
+                return QtCore.QRectF()
+            h = self.pixelLength(pg.Point(0, 1))
+            # o = self.mapToScene(QtCore.QPointF(0, 0))
+            # w = abs(1.0 / (self.mapToScene(QtCore.QPointF(1, 0)) - o).x())
+            # h = abs(1.0 / (self.mapToScene(QtCore.QPointF(0, 1)) - o).y())
+            self._px = (w, h)
+            w *= 21
+            h *= 21
+            self._bounds = QtCore.QRectF(-w, -h, w*2, h*2)
+        return self._bounds
+
+    def viewTransformChanged(self):
+        self._bounds = None
+        self.prepareGeometryChange()
+
+    def paint(self, p, *args):
+        p.setRenderHint(p.Antialiasing)
+        px, py = self._px
+        w = 4 * px
+        h = 4 * py
+        r = QtCore.QRectF(-w, -h, w*2, h*2)
+        p.setPen(pg.mkPen(self.color))
+        p.setBrush(pg.mkBrush(0, 0, 255, 100))
+        p.drawEllipse(r)
+        p.drawLine(pg.Point(-w*2, 0), pg.Point(w*2, 0))
+        p.drawLine(pg.Point(0, -h*2), pg.Point(0, h*2))
 
 
 class RulerROI(pg.LineSegmentROI):
@@ -518,7 +628,7 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
     the larger annotations to smaller, unused values.
     """
     global onto, ontology, data, mapping, inds, vxsize, info, ma
-    
+
     import nrrd
     if nrrdFile is None:
         nrrdFile = QtGui.QFileDialog.getOpenFileName(None, "Select NRRD annotation file")
@@ -606,12 +716,15 @@ def parseOntology(root, parent=-1):
     return ont
 
 
-def writeFile(data, file, **kwds):
+def writeFile(data, file):
     dataDir = os.path.dirname(file)
     if dataDir != '' and not os.path.exists(dataDir):
         os.makedirs(dataDir)
-    data.write(file, **kwds)
 
+    if max(data.shape) > 200 and min(data.shape) > 200:
+        data.write(file, chunks=(200, 200, 200))
+    else:
+        data.write(file)
 
 
 
@@ -654,7 +767,6 @@ class SignalBlock(object):
         self.signal.connect(self.slot)
 
 
-
 if __name__ == '__main__':
 
     app = pg.mkQApp()
@@ -662,21 +774,43 @@ if __name__ == '__main__':
     v = AtlasViewer()
     v.show()
 
-    path = os.path.dirname(__file__)
+    path = os.path.dirname(os.path.realpath(__file__))
     atlasFile = os.path.join(path, "ccf.ma")
     labelFile = os.path.join(path, "ccf_label.ma")
 
     if os.path.isfile(atlasFile):
         atlas = metaarray.MetaArray(file=atlasFile, readAllData=True)
     else:
-        atlas = readNRRDAtlas()
-        writeFile(atlas, atlasFile)
+        try:
+            atlas = readNRRDAtlas()
+            writeFile(atlas, atlasFile)
+        except:
+            try:
+                print "Unexpected error when creating ccf.ma file with " + atlasFile
+                print traceback.print_exc()
+                raise
+            finally:
+                print "Removing ccf.ma"
+                if os.path.isfile(atlasFile):
+                    os.remove(atlasFile)
 
     if os.path.isfile(labelFile):
         label = metaarray.MetaArray(file=labelFile, readAllData=True)
     else:
-        label = readNRRDLabels()
-        writeFile(label, labelFile, chunks=(200,200,200))
+        try:
+            label = readNRRDLabels()
+            writeFile(label, labelFile)
+        except:
+            try:
+                print "Unexpected error when creating ccf_label.ma file with " + labelFile
+                print traceback.print_exc()
+                raise
+            finally:
+                print "Removing ccf.ma and ccf_label.ma files..."
+                if os.path.isfile(atlasFile):
+                    os.remove(atlasFile)
+                if os.path.isfile(labelFile):
+                    os.remove(labelFile)
 
     v.setAtlas(atlas)
     v.setLabels(label)
