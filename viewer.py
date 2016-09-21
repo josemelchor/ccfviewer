@@ -131,23 +131,25 @@ class AtlasViewer(QtGui.QWidget):
         self.glView.addItem(mesh)
 
         self.glView.show()
-        
-    def mouseClicked(self, params):
-        point, to_clipboard = self.getCcfPoint(params)
+     
+    # mouse_point[0] contains the Point object.
+    # mouse_point[1] contains the structure id at Point
+    def mouseClicked(self, mouse_point):
+        point, to_clipboard = self.getCcfPoint(mouse_point)
         self.pointLabel.setText(point)
         self.view.target.setVisible(True)
-        self.view.target.setPos(self.view.view2.mapSceneToView(params[3]))
+        self.view.target.setPos(self.view.view2.mapSceneToView(mouse_point[0].scenePos()))
         self.view.clipboard.setText(to_clipboard)
 
     # Get CCF point coordinate and Structure id
     # Returns two strings. One used for display in a label and the other to put in the clipboard
     # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right
-    def getCcfPoint(self, params):
+    def getCcfPoint(self, mouse_point):
 
         axis = self.displayCtrl.params['Orientation']
-        p1 = self.view.mappedCoords[0][int(params[1])]
-        p2 = self.view.mappedCoords[1][int(params[1])]
-        p3 = params[0]
+        p1 = self.view.mappedCoords[0][int(mouse_point[0].pos().y())]
+        p2 = self.view.mappedCoords[1][int(mouse_point[0].pos().y())]
+        p3 = mouse_point[0].pos().x()
 
         vxsize = self.atlas._info[-1]['vxsize'] * 1e6
 
@@ -167,14 +169,14 @@ class AtlasViewer(QtGui.QWidget):
             p3 = abs(p3 - self.view.atlas.shape[0]) * vxsize
 
         if axis == 'right':
-            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(params[2])
-            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(params[2])
+            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(mouse_point[1])
+            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(mouse_point[1])
         elif axis == 'anterior':
-            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(params[2])
-            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(params[2])
+            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(mouse_point[1])
+            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(mouse_point[1])
         elif axis == 'dorsal':
-            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(params[2])
-            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(params[2])
+            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(mouse_point[1])
+            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(mouse_point[1])
         else:
             point = 'N/A'
             clipboard_text = 'NULL'
@@ -250,7 +252,7 @@ class LabelTree(QtGui.QWidget):
 
     def itemChange(self, item, col):
         checked = item.checkState(0) == QtCore.Qt.Checked
-        with pg.SignalBlock(self.tree.itemChanged, self.itemChange):
+        with SignalBlock(self.tree.itemChanged, self.itemChange):
             self.checkRecursive(item, checked)
         self.labelsChanged.emit()
 
@@ -377,7 +379,6 @@ class VolumeSliceView(QtGui.QWidget):
         self.lut.sigLevelsChanged.connect(self.histlutChanged)
         self.layout.addWidget(self.lut, 0, 1, 3, 1)
 
-        self.mappedCoords = None
         self.clipboard = QtGui.QApplication.clipboard()
 
     def setData(self, atlas, label, scale=None):
@@ -417,12 +418,11 @@ class VolumeSliceView(QtGui.QWidget):
     def updateSlice(self):
         if self.atlas is None:
             return
-        atlas = self.roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1,2), returnMappedCoords=True) 
-        self.mappedCoords = atlas[1]  # Original data points to map back to CCF
+        atlas, self.mappedCoords = self.roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1,2), returnMappedCoords=True)
         label = self.roi.getArrayRegion(self.label, self.img1.atlasImg, axes=(1,2), order=0)
-        if atlas[0].size == 0:
+        if atlas.size == 0:
             return
-        self.img2.setData(atlas[0], label, scale=self.scale)
+        self.img2.setData(atlas, label, scale=self.scale)
         self.view2.autoRange(items=[self.img2.atlasImg])
         self.target.setVisible(False)
         self.w1.viewport().repaint()  # repaint immediately to avoid processing more mouse events before next repaint
@@ -503,7 +503,7 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
 
     def mouseClickEvent(self, event):
         id = self.labelData[int(event.pos().x()), int(event.pos().y())]
-        self.mouseClicked.emit([event.pos().x(), event.pos().y(), id, event.scenePos(), event.screenPos()])
+        self.mouseClicked.emit([event, id])
 
     def boundingRect(self):
         return self.labelImg.boundingRect()
@@ -694,7 +694,6 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
         
     data = data.astype('uint16')
     mapping = np.array(list(mapping.items()))    
-    
  
     # voxel size in um
     vxsize = 1e-6 * float(header['space directions'][0][0])
