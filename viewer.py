@@ -378,15 +378,9 @@ class VolumeSliceView(QtGui.QWidget):
         self.view2.addItem(self.target)
         self.target.setVisible(False)
 
-        self.line_roi = RotateROI([0, 0], [.0020, .0020], maxBounds=QtCore.QRectF(-10, -10, 230, 140), pen=(0, 9), movable=False)
-        self.line_roi.setSize(pg.Point(.0025, 0))
+        self.line_roi = RulerROI([.005, 0], [.008, 0], angle=90, pen=(0, 9), movable=False)
         self.view1.addItem(self.line_roi, ignoreBounds=True)
         self.line_roi.sigRegionChanged.connect(self.updateSlice)
-
-        # TODO: Remove RulerROI of merge RotateROI into it
-        # self.roi = RulerROI([[10, 64], [120, 64]], pen='r')
-        # self.view1.addItem(self.roi, ignoreBounds=True)
-        # self.roi.sigRegionChanged.connect(self.updateSlice)
 
         self.zslider = QtGui.QSlider(QtCore.Qt.Horizontal)
         self.zslider.valueChanged.connect(self.updateImage)
@@ -412,19 +406,9 @@ class VolumeSliceView(QtGui.QWidget):
         if self.scale != scale:
             self.scale = scale
 
-            # # reset ROI position # TODO: Reset using new ROI coordinates
-            # with SignalBlock(self.roi.sigRegionChanged, self.updateSlice):
-            #     h1, h2 = self.roi.getHandles()
-            #     p1 = self.view1.mapViewToScene(pg.Point(0, 0))
-            #     if scale is None:
-            #         scale = (1, 1)
-            #     p2 = self.view1.mapViewToScene(pg.Point(100*scale[0], 100*scale[1]))
-            #     h1.movePoint([p1.x(), p1.y()])
-            #     h2.movePoint([p2.x(), p2.y()])
-
         self.zslider.setMaximum(atlas.shape[0])
         self.zslider.setValue(atlas.shape[0] // 2)
-        self.slider.setRange(-90, 90)  # TODO: need to define a better range
+        self.slider.setRange(-45, 45)
         self.slider.setValue(0)
         self.updateImage(autoRange=True)
         self.updateSlice()
@@ -451,8 +435,7 @@ class VolumeSliceView(QtGui.QWidget):
             label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, axes=(1, 2), order=0)
         else:
             atlas, self.mappedCoords = self.line_roi.getArrayRegion(self.atlas, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), returnMappedCoords=True)
-            label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), order=1)
-            # label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), order=0)
+            label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), order=0)
 
         if atlas.size == 0:
             return
@@ -472,7 +455,7 @@ class VolumeSliceView(QtGui.QWidget):
 
         h1, h2, h3, h4, h5 = self.line_roi.getHandles()
 
-        d_angle = pg.Point(h2.pos() - h1.pos())  # This gives the length in ccf coordinate size  # TODO: Document why using this.
+        d_angle = pg.Point(h2.pos() - h1.pos())  # This gives the length in ccf coordinate size 
         d = pg.Point(self.line_roi.mapToItem(img, h2.pos()) - self.line_roi.mapToItem(img, h1.pos()))
 
         origin_roi = self.line_roi.mapToItem(img, h1.pos())
@@ -483,20 +466,21 @@ class VolumeSliceView(QtGui.QWidget):
             offset = self.get_offset(rotation)
         
         # This calculates by how much the ROI needs to shift
-        hyp = (offset * self.scale[0]) / (math.cos(math.radians(-(90 - d.angle(pg.Point(1, 0)))))) 
-        opposite = (math.sin(math.radians(-(90 - d.angle(pg.Point(1, 0)))))) * hyp
-        adjacent = opposite / (math.tan(math.radians(-(90 - d.angle(pg.Point(1, 0))))))
+        if d.angle(pg.Point(1, 0)) == 90.0:
+            # when ROI is on a 90 degree angle, can't really calculate using a right-angle triangle, ugh
+            hyp, opposite, adjacent = offset * self.scale[0], 0, offset * self.scale[0]
+        else:
+            hyp = (offset * self.scale[0])  # / (math.cos(math.radians(-(90 - d.angle(pg.Point(1, 0)))))) 
+            opposite = (math.sin(math.radians(-(90 - d.angle(pg.Point(1, 0)))))) * hyp
+            adjacent = opposite / (math.tan(math.radians(-(90 - d.angle(pg.Point(1, 0))))))
         
-        # TODO: make sure offset is a correct depiction of the angle change
-        self.line_roi.sigRegionChanged.disconnect(self.updateSlice)  # This is kind of a hack to avoid recursion error. Using update=False doesn't move the handles.
+        # This is kind of a hack to avoid recursion error. Using update=False doesn't move the handles.
+        self.line_roi.sigRegionChanged.disconnect(self.updateSlice)  
+        # increase size to denote rotation
         self.line_roi.setSize(pg.Point(d_angle.length(), hyp * 2))
+        # Shift position in order to keep the cutting axis in the middle
         self.line_roi.setPos(pg.Point((origin_roi.x() * self.scale[-1]) + adjacent, (origin_roi.y() * self.scale[-1]) + opposite))
         self.line_roi.sigRegionChanged.connect(self.updateSlice)
-
-    # def rotatePoint(self, point, theta): # TODO: REmove
-    #     theta = math.radians(theta)
-    #     return (point[0] * math.cos(theta) - point[1] * math.sin(theta),
-    #             point[0] * math.sin(theta) + point[1] * math.cos(theta))
 
     def get_offset(self, rotation):
         theta = math.radians(-rotation)
@@ -564,8 +548,7 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
             self.resetTransform()
             self.scale(*scale)
         self.atlasImg.setImage(self.atlasData, autoLevels=False)
-        # self.labelImg.setImage(self.labelData, autoLevels=False)  
-        self.labelImg.setImage(self.labelData, autoLevels=True)  # TODO: Changed this, make sure it is fine.
+        self.labelImg.setImage(self.labelData, autoLevels=False)  
 
     def setLUT(self, lut):
         self.labelImg.setLookupTable(lut)
@@ -601,9 +584,8 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
         return self.labelImg.shape()
 
 
-class RotateROI(pg.ROI):
+class RulerROI(pg.ROI):
     def __init__(self, pos, size, **args):
-        # QtGui.QGraphicsRectItem.__init__(self, pos[0], pos[1], size[0], size[1])
         pg.ROI.__init__(self, pos, size, **args)
         self.addRotateHandle([0, 0.5], [1, 1])
         self.addScaleRotateHandle([1, 0.5], [0.5, 0.5])
@@ -624,17 +606,16 @@ class RotateROI(pg.ROI):
 
         vec = pg.Point(h2) - pg.Point(h1)
         length = vec.length()
-        angle = vec.angle(pg.Point(1, 0))
 
         pvec = p2 - p1
         pvecT = pg.Point(pvec.y(), -pvec.x())
         pos = 0.5 * (p1 + p2) + pvecT * 40 / pvecT.length()
 
-        angle_two = pg.Point(pvec).angle(pg.Point(1, 0))  # TODO: this is wrong because pvec is pointing down, why?
+        angle = pg.Point(1, 0).angle(pg.Point(pvec)) 
         
         p.resetTransform()
 
-        txt = pg.siFormat(length, suffix='m') + '\n%0.1f deg' % angle_two
+        txt = pg.siFormat(length, suffix='m') + '\n%0.1f deg' % angle
         p.drawText(QtCore.QRectF(pos.x() - 50, pos.y() - 50, 100, 100), QtCore.Qt.AlignCenter | QtCore.Qt.AlignVCenter, txt)
 
     def boundingRect(self):
@@ -643,26 +624,17 @@ class RotateROI(pg.ROI):
         return r.adjusted(-50, -50, 50, 50)
 
     def getArrayRegion(self, data, img, axes=(0, 1), order=1, returnMappedCoords=False, rotation=0, **kwds):
-        """
-        Use the position of this ROI relative to an imageItem to pull a slice
-        from an array.
-
-        Since this pulls 1D data from a 2D coordinate system, the return value
-        will have ndim = data.ndim-1
-
-        See ROI.getArrayRegion() for a description of the arguments.
-        """
 
         imgPts = [self.mapToItem(img, h.pos()) for h in self.getHandles()]
 
-        d = pg.Point(imgPts[1] - imgPts[0])
+        d = pg.Point(imgPts[1] - imgPts[0]) # This is the xy direction vector
         o = pg.Point(imgPts[0])
        
         if rotation != 0:
-            new_vector, new_v_length, vector2, origin_x, origin_y, origin_z = self.get_affine_slice_params(data, img, o, d, rotation)
-            rgn = fn.affineSlice(data, shape=(int(new_v_length), int(d.length())),
-                                 vectors=[new_vector, vector2],
-                                 origin=(origin_x, origin_y, origin_z), axes=axes, order=order,
+            xz_vector, xz_vector_length, origin = self.get_affine_slice_params(data, img, rotation)
+            rgn = fn.affineSlice(data, shape=(int(xz_vector_length), int(d.length())),
+                                 vectors=[xz_vector, (d.norm().x(), d.norm().y(), 0)],
+                                 origin=origin, axes=axes, order=order,
                                  returnCoords=returnMappedCoords, **kwds)
 
         else:
@@ -670,10 +642,10 @@ class RotateROI(pg.ROI):
                                  order=order, returnCoords=returnMappedCoords, **kwds)
         return rgn
 
-    # Gets the vector and origin along the x,z axis  
-    # TODO: Document the use of vector arithmetic on x-y plane when in reality is for x-z plane
-    # TODO: Need to use shape dynamically to work when changing orientations.
-    def get_affine_slice_params(self, data, img, start_pos, d, rotation):
+    def get_affine_slice_params(self, data, img, rotation):
+        """
+        Use the position of this ROI handles to get a new vector for the x-z direction.
+        """
         counter_clockwise = rotation < 0
         
         h1, h2, h3, h4, h5 = self.getHandles()
@@ -682,99 +654,19 @@ class RotateROI(pg.ROI):
         
         if counter_clockwise:
             origin = pg.Point(origin_roi.x(), origin_roi.y())
-            end_point = pg.Point(left_corner.x(), data.shape[0])
+            end_point = pg.Point(left_corner.x(), data.shape[0] + origin_roi.y())
             new_vector = end_point - origin
             diff_y = left_corner.y() - origin_roi.y() 
         else:
             origin = pg.Point(left_corner.x(), left_corner.y())  
-            end_point = pg.Point(origin_roi.x(), data.shape[0])
+            end_point = pg.Point(origin_roi.x(), data.shape[0] + left_corner.y())
             new_vector = end_point - left_corner
             diff_y = origin_roi.y() - origin.y()
  
-        new_vector_length = math.sqrt((new_vector.x() * new_vector.x()) + (new_vector.y() * new_vector.y()) + (diff_y * diff_y))
-        new_3d_vector = (new_vector.x() / new_vector_length, diff_y/new_vector_length, new_vector.y()/new_vector_length)
+        xz_vector_length = math.sqrt((new_vector.x() * new_vector.x()) + (new_vector.y() * new_vector.y()) + (diff_y * diff_y))
+        xz_vector = (new_vector.x() / xz_vector_length, diff_y/xz_vector_length, new_vector.y()/xz_vector_length)
         
-        return new_3d_vector, data.shape[0], (d.norm().x(), d.norm().y(), 0), origin.x(), origin.y(), 0
-
-    # Gets the vector and origin along the x,z axis
-    # This is no longer used. # TODO: Remove this
-    # def get_affine_slice_params_V1(self, data, img, start_pos, d, rotation):
-    #     counter_clockwise = rotation < 0
-    # 
-    #     # Figuring out Vector to use along the (x,z) axis
-    #     # Figure out the angle of rotation in radians. Initial vector starts at (0,1)
-    #     theta = math.radians(-rotation)
-    # 
-    #     # Figure out the unit vector with theta angle
-    #     x, z = 0, 1
-    #     dc, ds = math.cos(theta), math.sin(theta)
-    #     xv = dc * x - ds * z
-    #     zv = ds * x + dc * z
-    # 
-    #     # Figure out the slope of the unit vector
-    #     m = zv / xv
-    # 
-    #     # y = mx + b
-    #     # Calculate the x-intercept. using half the distance in the z-dimension as b. Since we want the axis of rotation in the middle
-    #     offset = (-data.shape[0] / 2) / m
-    # 
-    #     b = (data.shape[0] / 2) - (m * (start_pos.x()))
-    # 
-    #     x_min = start_pos.x() - abs(offset)
-    #     x_max = start_pos.x() + abs(offset)
-    # 
-    #     # Figure out start and end points
-    #     if x_min < 0:
-    #         # When out of bounds in the x-axis, use the z-axis 
-    #         p1x = 0
-    #         p1z = b  # This should be z at x=0
-    #     else:
-    #         p1x = x_min
-    #         if counter_clockwise:
-    #             p1z = data.shape[0]
-    #         else:
-    #             p1z = 0
-    # 
-    #     if x_max > data.shape[1]:
-    #         # When out of bounds in the x-axis, use the z-axis
-    #         p2x = data.shape[1]
-    #         p2z = (m * data.shape[1]) + b
-    #     else:
-    #         p2x = x_max
-    # 
-    #         if counter_clockwise:
-    #             p2z = 0
-    #         else:
-    #             p2z = data.shape[0]
-    # 
-    #     if counter_clockwise:
-    #         new_vector = pg.Point(pg.Point(p1x, p1z) - pg.Point(p2x, p2z))
-    #         origin_x = p2x
-    #         origin_z = p2z
-    #     else:
-    #         new_vector = pg.Point(pg.Point(p2x, p2z) - pg.Point(p1x, p1z))
-    #         origin_x = p1x
-    #         origin_z = p1z
-    # 
-    #     axis = [0, 1, 0]
-    #     v = [d.norm().x(), d.norm().y(), 0]
-    # 
-    #     # Option 2
-    #     M0 = self.test(axis, theta)
-    #     vector2 = dot(M0, v)
-    # 
-    #     return new_vector, vector2, origin_x, start_pos.y(), origin_z
-    # 
-    # def test(self, axis, theta):
-    #     return expm3(cross(eye(3), axis / norm(axis) * theta))
-    # 
-    # def rotatePolygon(self, polygon, theta):
-    #     theta = math.radians(theta)
-    #     rotatedPolygon = []
-    #     for corner in polygon:
-    #         rotatedPolygon.append((corner[0] * math.cos(theta) - corner[1] * math.sin(theta),
-    #                                corner[0] * math.sin(theta) + corner[1] * math.cos(theta)))
-    #     return rotatedPolygon
+        return xz_vector, xz_vector_length, (origin.x(), origin.y(), 0)
 
 
 class Target(pg.GraphicsObject):
@@ -814,107 +706,7 @@ class Target(pg.GraphicsObject):
         p.drawEllipse(r)
         p.drawLine(pg.Point(-w*2, 0), pg.Point(w*2, 0))
         p.drawLine(pg.Point(0, -h*2), pg.Point(0, h*2))
-
-
-class RulerROI(pg.LineSegmentROI):
-    def paint(self, p, *args):
-        pg.LineSegmentROI.paint(self, p, *args)
-        h1 = self.handles[0]['item'].pos()
-        h2 = self.handles[1]['item'].pos()
-        p1 = p.transform().map(h1)
-        p2 = p.transform().map(h2)
-
-        vec = pg.Point(h2) - pg.Point(h1)
-        length = vec.length()
-        angle = vec.angle(pg.Point(1, 0))
-
-        pvec = p2 - p1
-        pvecT = pg.Point(pvec.y(), -pvec.x())
-        pos = 0.5 * (p1 + p2) + pvecT * 40 / pvecT.length()
-
-        p.resetTransform()
-
-        txt = pg.siFormat(length, suffix='m') + '\n%0.1f deg' % angle
-        p.drawText(QtCore.QRectF(pos.x()-50, pos.y()-50, 100, 100), QtCore.Qt.AlignCenter | QtCore.Qt.AlignVCenter, txt)
-
-    # # Gets the vector and origin along the x,z axis  # TODO: Remove functions below after confirming they're not needed
-    # def get_affine_slice_params(self, data, start_pos, d, rotation):
-    #     counter_clockwise = rotation < 0
-    # 
-    #     # Figuring out Vector to use along the (x,z) axis
-    #     # Figure out the angle of rotation in radians. Initial vector starts at (0,1)
-    #     theta = math.radians(-rotation)
-    # 
-    #     # Figure out the unit vector with theta angle
-    #     x, z = 0, 1
-    #     dc, ds = math.cos(theta), math.sin(theta)
-    #     xv = dc * x - ds * z
-    #     zv = ds * x + dc * z
-    # 
-    #     # Figure out the slope of the unit vector
-    #     m = zv / xv
-    # 
-    #     # y = mx + b
-    #     # Calculate the x-intercept. using half the distance in the z-dimension as b. Since we want the axis of rotation in the middle
-    #     offset = (-data.shape[0] / 2) / m
-    # 
-    #     b = (data.shape[0] / 2) - (m * (start_pos.x()))
-    # 
-    #     x_min = start_pos.x() - abs(offset)
-    #     x_max = start_pos.x() + abs(offset)
-    # 
-    #     # Figure out start and end points
-    #     if x_min < 0:
-    #         # When out of bounds in the x-axis, use the z-axis 
-    #         p1x = 0
-    #         p1z = b  # This should be z at x=0
-    #     else:
-    #         p1x = x_min
-    #         if counter_clockwise:
-    #             p1z = data.shape[0]
-    #         else:
-    #             p1z = 0
-    # 
-    #     if x_max > data.shape[1]:
-    #         # When out of bounds in the x-axis, use the z-axis
-    #         p2x = data.shape[1]
-    #         p2z = (m * data.shape[1]) + b
-    #     else:
-    #         p2x = x_max
-    # 
-    #         if counter_clockwise:
-    #             p2z = 0
-    #         else:
-    #             p2z = data.shape[0]
-    # 
-    #     if counter_clockwise:
-    #         new_vector = pg.Point(pg.Point(p1x, p1z) - pg.Point(p2x, p2z))
-    #         origin_x = p2x
-    #         origin_z = p2z
-    #     else:
-    #         new_vector = pg.Point(pg.Point(p2x, p2z) - pg.Point(p1x, p1z))
-    #         origin_x = p1x
-    #         origin_z = p1z
-    # 
-    #     axis = [0, 1, 0]
-    #     v = [d.norm().x(), d.norm().y(), 0]
-    # 
-    #     M0 = self.test(axis, theta)
-    #     vector2 = dot(M0, v)
-    # 
-    #     return new_vector, vector2, origin_x, origin_z
-    # 
-    # def test(self, axis, theta):
-    #     return expm3(cross(eye(3), axis / norm(axis) * theta))
-    # 
-    # def rotatePolygon(self, polygon, theta):
-    #     theta = math.radians(theta)
-    #     rotatedPolygon = []
-    #     for corner in polygon:
-    #         rotatedPolygon.append((corner[0] * math.cos(theta) - corner[1] * math.sin(theta),
-    #                                corner[0] * math.sin(theta) + corner[1] * math.cos(theta)))
-    #     return rotatedPolygon
-
+        
 
 def readNRRDAtlas(nrrdFile=None):
     """
