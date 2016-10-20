@@ -1,3 +1,4 @@
+from ast import literal_eval
 import sys, os, traceback
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 
@@ -9,8 +10,7 @@ import pyqtgraph.functions as fn
 import pyqtgraph.metaarray as metaarray
 from pyqtgraph.Qt import QtGui, QtCore
 import math
-from numpy import cross, eye, dot
-from scipy.linalg import expm3, norm
+import points_to_aff
 
 
 class AtlasBuilder(QtGui.QMainWindow):
@@ -58,6 +58,10 @@ class AtlasViewer(QtGui.QWidget):
         self.labelTree = LabelTree(self)
         self.labelTree.labelsChanged.connect(self.labelsChanged)
         self.ctrlLayout.addWidget(self.labelTree)
+        
+        self.coordinateCtrl = CoordinatesCtrl(self)
+        self.coordinateCtrl.coordinateSubmitted.connect(self.coordinateSubmitted)
+        self.ctrlLayout.addWidget(self.coordinateCtrl)
 
     def setLabels(self, label):
         self.label = label
@@ -69,6 +73,7 @@ class AtlasViewer(QtGui.QWidget):
 
     def setAtlas(self, atlas):
         self.atlas = atlas
+        self.coordinateCtrl.atlas_shape = atlas.shape
         self.updateImage()
 
     def updateImage(self):
@@ -152,7 +157,10 @@ class AtlasViewer(QtGui.QWidget):
 
         axis = self.displayCtrl.params['Orientation']
         vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        print '-- vxsize'
+        print vxsize
         z_axis_rotated = self.view.slider.value() != 0
+        # h1, h2, h3, h4, h5 = self.view.line_roi.getHandles()
 
         if z_axis_rotated:
             p1 = self.view.mappedCoords[0][int(mouse_point[0].pos().x())][int(mouse_point[0].pos().y())]
@@ -167,21 +175,17 @@ class AtlasViewer(QtGui.QWidget):
         if p1 > self.view.atlas.shape[1] or p1 < 0:
             p1 = 'N/A'
         else:
-            p1 = abs(p1 - self.view.atlas.shape[1]) * vxsize
-
+            p1 = (self.view.atlas.shape[1] - p1) * vxsize
         if p2 > self.view.atlas.shape[2] or p2 < 0:
             p2 = 'N/A'
         else:
-            p2 = abs(p2 - self.view.atlas.shape[2]) * vxsize
+            p2 = (self.view.atlas.shape[2] - p2) * vxsize
 
         if p3 > self.view.atlas.shape[0] or p3 < 0:
             p3 = 'N/A'
         else:
-            if z_axis_rotated:
-                p3 = abs(self.view.atlas.shape[0] - p3) * vxsize
-            else:
-                p3 = abs(p3 - self.view.atlas.shape[0]) * vxsize
-
+            p3 = (self.view.atlas.shape[0] - p3) * vxsize
+        
         if axis == 'right':
             point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(mouse_point[1])
             clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(mouse_point[1])
@@ -194,10 +198,177 @@ class AtlasViewer(QtGui.QWidget):
         else:
             point = 'N/A'
             clipboard_text = 'NULL'
+            
+        # TODO: Remove, this was only a test to make sure translation was correct
+        # Need to use handle 5 instead of ROI.pos() due to mapToItem not working whe using ROI.pos()
+        # print '-- h5'
+        # print h5.pos()    
+        # print '-- h5 from getccfpoint'
+        # h5_ccf_coord = self.view.line_roi.mapToItem(self.view.img1.atlasImg, h5.pos())  # This is the point in the ccf without translation
+        # print h5_ccf_coord
+        # 
+        # TODO: Could set the ROI position and size in the getArrayRegion function
+        # TODO: This translates the point to ccf coordinates. is it necessary if the xv and xz vector will be saved?
+        #   if it is needed, then a function to translate the point back is needed.
+        # self.view.line_roi.position = ((self.view.atlas.shape[1] - h5_ccf_coord.x()) * vxsize, (self.view.atlas.shape[2] - h5_ccf_coord.y()) * vxsize)
+        
+        roi_origin_position = (self.view.line_roi.pos().x(), self.view.line_roi.pos().y())
+        roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())
+        
+        roi_params = "{};{};{};{};{};{};{};{}".format(roi_origin_position, roi_size, self.view.line_roi.angle1, 
+                                                      self.view.line_roi.angle2, axis, self.view.line_roi.origin,
+        
+                                                      self.view.line_roi.xy_vector, self.view.line_roi.xz_vector)
+        
+        # compute the 4x4 transform matrix
+        a = self.to_scale(self.view.line_roi.origin)
+        ab = self.to_scale(self.view.line_roi.xy_vector)
+        ac = self.to_scale(self.view.line_roi.xz_vector)
+        
+        print '-- a, ab, ac'
+        print a
+        print ab
+        print ac
+        
+        M0, M0i = points_to_aff.points_to_aff(a, ab, ac)
 
-        return point, clipboard_text
+        # build the lims dictionary
+        ob = points_to_aff.aff_to_lims_obj(M0, M0i)
+        
+        print '-- LIMS points'
+        print ob
+        
+        # convert it back into a matrix for testing
+        M1, M1i = points_to_aff.lims_obj_to_aff(ob)
 
+        a_new, ab_new, ac_new = points_to_aff.aff_to_origin_and_vectors(M1i)
+        
+        print "***"
+        print "a before", a, "after", a_new, "diff", np.linalg.norm(a - a_new)
+        print "b before", ab, "after", ab_new, "diff", np.linalg.norm(ab - ab_new)
+        print "c before", ac, "after", ac_new, "diff", np.linalg.norm(ac - ac_new)
+        
+        clipboard_text = "{};{}".format(clipboard_text, roi_params)
+        
+        return point, clipboard_text # TODO: output json(?)
+    
+    def to_scale(self, point):
+        p_to_ccf = []
+        for p in point:
+            p_to_ccf.append(p * self.atlas._info[-1]['vxsize'] * 1e6)
+            
+        return p_to_ccf
 
+    def coordinateSubmitted(self):
+        coord_args = str(self.coordinateCtrl.line.text()).split(';')
+        
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        x = float(coord_args[0])
+        y = float(coord_args[1])
+        z = float(coord_args[2])
+        
+        if len(coord_args) < 3:
+            return
+        
+        if len(coord_args) <= 4:
+            # When only 4 points are given, assume orientation to be 'right'
+            translated_x = (self.view.atlas.shape[1] - (float(coord_args[0])/vxsize)) * self.view.scale[0] 
+            to_pos = (translated_x, 0.0)
+            to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0)
+            to_angle1 = 90
+            to_angle2 = 0
+            orientation = 'right'
+        else:
+            to_pos = self.st_to_tuple(coord_args[4])
+            to_size = self.st_to_tuple(coord_args[5])
+            to_angle1 = float(coord_args[6])
+            to_angle2 = float(coord_args[7])
+            orientation = coord_args[8]
+        
+        target_point = self.ccf_point_to_view((x, y, z), orientation)
+        # TODO: Change orientation if needed
+        
+        self.view.line_roi.setPos(pg.Point(to_pos))
+        self.view.line_roi.setSize(pg.Point(to_size))
+        self.view.line_roi.setAngle(to_angle1)
+        self.view.slider.setValue(to_angle2)
+        self.view.target.setPos(target_point[0], target_point[1])
+        self.view.target.setVisible(True) # TODO: keep target visible when coming back to the same slice... how?
+      
+    # This function translates back to the orientation used in the viewer and to the view coordinate of the lower slice.
+    def ccf_point_to_view(self, pos, orientation):  
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        
+        if orientation == 'right':
+            slice_x, slice_y = pos[2], pos[1]
+        elif orientation == 'anterior':
+            slice_x, slice_y = pos[0], pos[1]
+        elif orientation == 'dorsal':
+            slice_x, slice_y = pos[1], pos[0]
+        else:
+            slice_x, slice_y = pos[2], pos[1]
+            
+        return (self.view.atlas.shape[0] - (slice_x/vxsize)) * self.view.scale[0], (self.view.atlas.shape[2] - (slice_y/vxsize)) * self.view.scale[1]
+        
+    def st_to_tuple(self, pos):
+        return literal_eval(pos)
+    
+
+class CoordinatesCtrl(QtGui.QWidget):
+    coordinateSubmitted = QtCore.Signal()
+    
+    def __init__(self, parent=None):
+        QtGui.QWidget.__init__(self, parent)
+        self.layout = QtGui.QGridLayout()
+        self.setLayout(self.layout)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.line = QtGui.QLineEdit(self)
+        self.line.returnPressed.connect(self.set_coordinate)
+        self.layout.addWidget(self.line, 0, 0)
+
+        self.btn = QtGui.QPushButton('Set Coordinate', self)
+        self.layout.addWidget(self.btn, 1, 0)
+        self.btn.clicked.connect(self.set_coordinate)
+    
+    def set_coordinate(self):
+        errors = self.validate_location()
+        if not errors:
+            self.coordinateSubmitted.emit()
+        else:
+            print '-- Errors'
+            print errors
+            
+    def validate_location(self):
+        location = self.line.text()
+        if location:
+            tokens = str(self.line.text()).split(';')
+            if len(tokens) < 3:
+                return "Coordinate is malformed"
+            elif len(tokens) == 3 or len(tokens) == 4:
+                errors = self.target_within_range(float(tokens[0]), float(tokens[1]), float(tokens[2])) 
+            else:
+                errors = self.target_within_range(float(tokens[0]), float(tokens[1]), float(tokens[2]))
+                
+            return errors
+        else:
+            return "No coordinate provided"
+    
+    def target_within_range(self, x, y, z):
+
+        vxsize = atlas._info[-1]['vxsize'] * 1e6
+        error = ""
+        if z > (self.atlas_shape[2] * vxsize) or z < 0:
+            error += "z coordinate {} is not within CCF range".format(z)
+        if x > self.atlas_shape[0] * vxsize or x < 0:
+            error += " x coordinate {} is not within CCF range".format(x)
+        if y > self.atlas_shape[1] * vxsize or y < 0:
+            error += " y coordinate {} is not within CCF range".format(y)
+        
+        return error
+    
+        
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
     def __init__(self, parent=None):
         pg.parametertree.ParameterTree.__init__(self, parent=parent)
@@ -587,6 +758,11 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
 class RulerROI(pg.ROI):
     def __init__(self, pos, size, **args):
         pg.ROI.__init__(self, pos, size, **args)
+        self.xy_vector = (0, 0, 0)
+        self.xz_vector = (0, 0, 0)
+        self.origin = (0, 0, 0)
+        self.angle1 = 90
+        self.angle2 = 0
         self.addRotateHandle([0, 0.5], [1, 1])
         self.addScaleRotateHandle([1, 0.5], [0.5, 0.5])
         self.addTranslateHandle([0.5, 0.5])
@@ -612,6 +788,7 @@ class RulerROI(pg.ROI):
         pos = 0.5 * (p1 + p2) + pvecT * 40 / pvecT.length()
 
         angle = pg.Point(1, 0).angle(pg.Point(pvec)) 
+        self.angle1 = angle  # TODO: Try to set this somewhere else
         
         p.resetTransform()
 
@@ -635,16 +812,22 @@ class RulerROI(pg.ROI):
             rgn = fn.affineSlice(data, shape=(int(xz_vector_length), int(d.length())),
                                  vectors=[xz_vector, (d.norm().x(), d.norm().y(), 0)],
                                  origin=origin, axes=axes, order=order,
-                                 returnCoords=returnMappedCoords, **kwds)
-
+                                 returnCoords=returnMappedCoords, **kwds) 
         else:
-            rgn = fn.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes,
-                                 order=order, returnCoords=returnMappedCoords, **kwds)
+            rgn = fn.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes, order=order, returnCoords=returnMappedCoords, **kwds)
+            # Save vector and origin
+            self.xz_vector = (0, 0, data.shape[0])
+            self.origin = (o.x(), o.y(), 0.0) 
+        
+        # save this as well
+        self.xy_vector = (d.x(), d.y(), 0)
+        self.angle2 = rotation
+        
         return rgn
 
     def get_affine_slice_params(self, data, img, rotation):
         """
-        Use the position of this ROI handles to get a new vector for the x-z direction.
+        Use the position of this ROI handles to get a new vector for the slice view's x-z direction.
         """
         counter_clockwise = rotation < 0
         
@@ -666,7 +849,11 @@ class RulerROI(pg.ROI):
         xz_vector_length = math.sqrt((new_vector.x() * new_vector.x()) + (new_vector.y() * new_vector.y()) + (diff_y * diff_y))
         xz_vector = (new_vector.x() / xz_vector_length, diff_y/xz_vector_length, new_vector.y()/xz_vector_length)
         
-        return xz_vector, xz_vector_length, (origin.x(), origin.y(), 0)
+        # Save vector and origin
+        self.xz_vector = (new_vector.x(), diff_y, new_vector.y())
+        self.origin = (origin.x(), origin.y(), 0)
+        
+        return xz_vector, xz_vector_length, self.origin
 
 
 class Target(pg.GraphicsObject):
@@ -899,6 +1086,7 @@ if __name__ == '__main__':
     app = pg.mkQApp()
 
     v = AtlasViewer()
+    v.setWindowTitle('CCF Viewer')
     v.show()
 
     path = os.path.dirname(os.path.realpath(__file__))
