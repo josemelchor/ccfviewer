@@ -21,7 +21,7 @@ def points_to_aff(a, ab, ac):
 
     uv0 = v0 / sv0
     uv1 = v1 / sv1
-    uv2 = np.cross(v0,v1)
+    uv2 = np.cross(uv0, uv1)
 
     S = np.array([[ sv0, 0,   0, 0 ],
                   [ 0,   sv1, 0, 0 ],

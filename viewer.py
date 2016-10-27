@@ -157,20 +157,17 @@ class AtlasViewer(QtGui.QWidget):
 
         axis = self.displayCtrl.params['Orientation']
         vxsize = self.atlas._info[-1]['vxsize'] * 1e6
-        print '-- vxsize'
-        print vxsize
         z_axis_rotated = self.view.slider.value() != 0
-        # h1, h2, h3, h4, h5 = self.view.line_roi.getHandles()
 
-        if z_axis_rotated:
-            p1 = self.view.mappedCoords[0][int(mouse_point[0].pos().x())][int(mouse_point[0].pos().y())]
-            p2 = self.view.mappedCoords[1][int(mouse_point[0].pos().x())][int(mouse_point[0].pos().y())]
-            p3 = self.view.mappedCoords[2][int(mouse_point[0].pos().x())][int(mouse_point[0].pos().y())]
+        if z_axis_rotated:  
+            p1 = self.view.mappedCoords[0][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
+            p2 = self.view.mappedCoords[1][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
+            p3 = self.view.mappedCoords[2][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
         else:
             p1 = self.view.mappedCoords[0][int(mouse_point[0].pos().y())]
             p2 = self.view.mappedCoords[1][int(mouse_point[0].pos().y())]
             p3 = mouse_point[0].pos().x()
-
+        
         # check ccf bounds, change to PIR orientation if within bounds
         if p1 > self.view.atlas.shape[1] or p1 < 0:
             p1 = 'N/A'
@@ -199,67 +196,83 @@ class AtlasViewer(QtGui.QWidget):
             point = 'N/A'
             clipboard_text = 'NULL'
             
-        # TODO: Remove, this was only a test to make sure translation was correct
-        # Need to use handle 5 instead of ROI.pos() due to mapToItem not working whe using ROI.pos()
-        # print '-- h5'
-        # print h5.pos()    
-        # print '-- h5 from getccfpoint'
-        # h5_ccf_coord = self.view.line_roi.mapToItem(self.view.img1.atlasImg, h5.pos())  # This is the point in the ccf without translation
-        # print h5_ccf_coord
-        # 
-        # TODO: Could set the ROI position and size in the getArrayRegion function
-        # TODO: This translates the point to ccf coordinates. is it necessary if the xv and xz vector will be saved?
-        #   if it is needed, then a function to translate the point back is needed.
-        # self.view.line_roi.position = ((self.view.atlas.shape[1] - h5_ccf_coord.x()) * vxsize, (self.view.atlas.shape[2] - h5_ccf_coord.y()) * vxsize)
-        
-        roi_origin_position = (self.view.line_roi.pos().x(), self.view.line_roi.pos().y())
-        roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())
-        
-        roi_params = "{};{};{};{};{};{};{};{}".format(roi_origin_position, roi_size, self.view.line_roi.angle1, 
-                                                      self.view.line_roi.angle2, axis, self.view.line_roi.origin,
-        
-                                                      self.view.line_roi.xy_vector, self.view.line_roi.xz_vector)
-        
         # compute the 4x4 transform matrix
-        a = self.to_scale(self.view.line_roi.origin)
-        ab = self.to_scale(self.view.line_roi.xy_vector)
-        ac = self.to_scale(self.view.line_roi.xz_vector)
-        
-        print '-- a, ab, ac'
-        print a
-        print ab
-        print ac
-        
-        M0, M0i = points_to_aff.points_to_aff(a, ab, ac)
+        a = self.scale_point_to_CCF(self.view.line_roi.origin)
+        ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
+        ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
 
-        # build the lims dictionary
+        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
+
+        # build the LIMS dictionary
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
         
-        print '-- LIMS points'
-        print ob
+        # These are just for testing
+        # roi_origin_position = (self.view.line_roi.pos().x(), self.view.line_roi.pos().y())
+        # roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())  
+        # roi_params = "{};{};{};{};{};{};{};{};{}".format(ob, roi_origin_position, roi_size, self.view.line_roi.ab_angle,
+        #                                                  self.view.line_roi.ac_angle, axis, self.view.line_roi.origin,
+        #                                                  self.view.line_roi.ab_vector, self.view.line_roi.ac_vector)
         
-        # convert it back into a matrix for testing
-        M1, M1i = points_to_aff.lims_obj_to_aff(ob)
+        # clipboard_text = "{};{}".format(clipboard_text, roi_params)
+        clipboard_text = "{};{}".format(clipboard_text, ob)
 
-        a_new, ab_new, ac_new = points_to_aff.aff_to_origin_and_vectors(M1i)
-        
-        print "***"
-        print "a before", a, "after", a_new, "diff", np.linalg.norm(a - a_new)
-        print "b before", ab, "after", ab_new, "diff", np.linalg.norm(ab - ab_new)
-        print "c before", ac, "after", ac_new, "diff", np.linalg.norm(ac - ac_new)
-        
-        clipboard_text = "{};{}".format(clipboard_text, roi_params)
-        
-        return point, clipboard_text # TODO: output json(?)
+        return point, clipboard_text  # TODO: output json(?)
     
-    def to_scale(self, point):
+    def scale_point_to_CCF(self, point):
+        """
+        Returns a tuple (x, y, z) scaled from Item coordinates to CCF coordinates
+        
+        Point is a tuple with values x, y, z (ordered) 
+        """
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        p_to_ccf = ((self.view.atlas.shape[1] - point[0]) * vxsize,
+                    (self.view.atlas.shape[2] - point[1]) * vxsize,
+                    (self.view.atlas.shape[0] - point[2]) * vxsize)
+        return p_to_ccf
+    
+    def scale_vector_to_PIR(self, vector):
+        """
+        Returns a list representing a vector. The new vector is scaled to CCF coordinate size. Also orients the vector to PIR orientaion.
+        
+        Vector must me specified as a list
+        """
         p_to_ccf = []
-        for p in point:
-            p_to_ccf.append(p * self.atlas._info[-1]['vxsize'] * 1e6)
-            
+        for p in vector:
+            p_to_ccf.append(-(p * self.atlas._info[-1]['vxsize'] * 1e6))  # Need to use negative since using PIR orientation
         return p_to_ccf
 
+    def ccf_point_to_view(self, pos):
+        """
+        This function translates a ccf's position to the view's coordinates.
+                
+        The pos is a tuple with values x, y, z
+        """
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        return ((self.view.atlas.shape[1] - (pos[0] / vxsize)) * self.view.scale[0],
+                (self.view.atlas.shape[2] - (pos[1] / vxsize)) * self.view.scale[1],
+                (self.view.atlas.shape[0] - (pos[2] / vxsize)) * self.view.scale[1])
+
+    def vector_to_view(self, vector):
+        """
+        Scales vector to view coordinate size. vector is a tuple with x, y, z (in that order)   
+        """
+        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+        new_point = ((vector[0] / vxsize) * self.view.scale[0],
+                     (vector[1] / vxsize) * self.view.scale[1],
+                     (vector[2] / vxsize) * self.view.scale[1])  
+        return new_point
+      
+    # These are here to test. Add to coord_arg to test
+    # to_pos = self.st_to_tuple(coord_args[5])
+    # to_size = self.st_to_tuple(coord_args[6])
+    # to_ab_angle = float(coord_args[7])
+    # to_ac_angle = float(coord_args[8])
+    # orientation = coord_args[9]    
     def coordinateSubmitted(self):
+        if self.displayCtrl.params['Orientation'] != "right":
+            print 'Set Coordinate function is only supported with Right orientation'
+            return
+        
         coord_args = str(self.coordinateCtrl.line.text()).split(';')
         
         vxsize = self.atlas._info[-1]['vxsize'] * 1e6
@@ -271,47 +284,59 @@ class AtlasViewer(QtGui.QWidget):
             return
         
         if len(coord_args) <= 4:
-            # When only 4 points are given, assume orientation to be 'right'
+            # When only 4 points are given, assume point needs to be set using orientation == 'right'
             translated_x = (self.view.atlas.shape[1] - (float(coord_args[0])/vxsize)) * self.view.scale[0] 
-            to_pos = (translated_x, 0.0)
-            to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0)
-            to_angle1 = 90
-            to_angle2 = 0
-            orientation = 'right'
+            translated_y = (self.view.atlas.shape[2] - (float(coord_args[1])/vxsize)) * self.view.scale[0] 
+            translated_z = (self.view.atlas.shape[0] - (float(coord_args[2])/vxsize)) * self.view.scale[0] 
+            roi_origin = (translated_x, 0.0)
+            to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0) 
+            to_ab_angle = 90
+            to_ac_angle = 0
+            target_p1 = translated_z 
+            target_p2 = translated_y
         else:
-            to_pos = self.st_to_tuple(coord_args[4])
-            to_size = self.st_to_tuple(coord_args[5])
-            to_angle1 = float(coord_args[6])
-            to_angle2 = float(coord_args[7])
-            orientation = coord_args[8]
-        
-        target_point = self.ccf_point_to_view((x, y, z), orientation)
-        # TODO: Change orientation if needed
-        
-        self.view.line_roi.setPos(pg.Point(to_pos))
-        self.view.line_roi.setSize(pg.Point(to_size))
-        self.view.line_roi.setAngle(to_angle1)
-        self.view.slider.setValue(to_angle2)
-        self.view.target.setPos(target_point[0], target_point[1])
-        self.view.target.setVisible(True) # TODO: keep target visible when coming back to the same slice... how?
-      
-    # This function translates back to the orientation used in the viewer and to the view coordinate of the lower slice.
-    def ccf_point_to_view(self, pos, orientation):  
-        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
-        
-        if orientation == 'right':
-            slice_x, slice_y = pos[2], pos[1]
-        elif orientation == 'anterior':
-            slice_x, slice_y = pos[0], pos[1]
-        elif orientation == 'dorsal':
-            slice_x, slice_y = pos[1], pos[0]
-        else:
-            slice_x, slice_y = pos[2], pos[1]
+            transform = literal_eval(coord_args[4])
+
+            # Use LIMS matrices to get the origin and vectors of the plane
+            M1, M1i = points_to_aff.lims_obj_to_aff(transform)
+            origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
             
-        return (self.view.atlas.shape[0] - (slice_x/vxsize)) * self.view.scale[0], (self.view.atlas.shape[2] - (slice_y/vxsize)) * self.view.scale[1]
+            target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
+            
+            # Put the origin and vectors back to view coordinates
+            roi_origin = np.array(self.ccf_point_to_view(origin))
+            ab_vector = -np.array(self.vector_to_view(ab_vector))
+            ac_vector = -np.array(self.vector_to_view(ac_vector))
+                
+            to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
+            
+            # Where the origin of the ROI should be
+            if to_ac_angle > 0:
+                roi_origin = ac_vector + roi_origin  
+                
+            to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
+            to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
         
-    def st_to_tuple(self, pos):
-        return literal_eval(pos)
+        self.view.target.setPos(target_p1, target_p2)
+        self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
+        self.view.line_roi.setSize(pg.Point(to_size))
+        self.view.line_roi.setAngle(to_ab_angle) 
+        self.view.slider.setValue(int(to_ac_angle))
+        self.view.target.setVisible(True)  # TODO: keep target visible when coming back to the same slice... how?
+       
+    def get_target_position(self, ccf_location, M, ab_vector, ac_vector, vxsize):
+        """
+        Use affine transform matrix M to map ccf coordinate back to original coordinates  
+        """
+        img_location = np.dot(M, ccf_location)
+        
+        p1 = (np.linalg.norm(ac_vector) / vxsize * img_location[1]) * self.view.scale[0]
+        p2 = (np.linalg.norm(ab_vector) / vxsize * img_location[0]) * self.view.scale[0]
+        
+        return p1, p2
+        
+    # def st_to_tuple(self, pos):
+    #     return literal_eval(pos)
     
 
 class CoordinatesCtrl(QtGui.QWidget):
@@ -756,13 +781,23 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
 
 
 class RulerROI(pg.ROI):
+    """
+    ROI subclass with one rotate handle, one scale-rotate handle and one translate handle. Rotate handles handles define a line. 
+    
+    ============== =============================================================
+    **Arguments**
+    positions      (list of two length-2 sequences) 
+    \**args        All extra keyword arguments are passed to ROI()
+    ============== =============================================================
+    """
+    
     def __init__(self, pos, size, **args):
         pg.ROI.__init__(self, pos, size, **args)
-        self.xy_vector = (0, 0, 0)
-        self.xz_vector = (0, 0, 0)
-        self.origin = (0, 0, 0)
-        self.angle1 = 90
-        self.angle2 = 0
+        self.ab_vector = (0, 0, 0)  # This is the vector pointing up/down from the origin
+        self.ac_vector = (0, 0, 0)  # This is the vector pointing across form the orign
+        self.origin = (0, 0, 0)     # This is the origin
+        self.ab_angle = 90  # angle on the ab_vector
+        self.ac_angle = 0   # angle of the ac_vector 
         self.addRotateHandle([0, 0.5], [1, 1])
         self.addScaleRotateHandle([1, 0.5], [0.5, 0.5])
         self.addTranslateHandle([0.5, 0.5])
@@ -788,7 +823,7 @@ class RulerROI(pg.ROI):
         pos = 0.5 * (p1 + p2) + pvecT * 40 / pvecT.length()
 
         angle = pg.Point(1, 0).angle(pg.Point(pvec)) 
-        self.angle1 = angle  # TODO: Try to set this somewhere else
+        self.ab_angle = angle  # TODO: Try to set this somewhere else
         
         p.resetTransform()
 
@@ -808,20 +843,24 @@ class RulerROI(pg.ROI):
         o = pg.Point(imgPts[0])
        
         if rotation != 0:
-            xz_vector, xz_vector_length, origin = self.get_affine_slice_params(data, img, rotation)
-            rgn = fn.affineSlice(data, shape=(int(xz_vector_length), int(d.length())),
-                                 vectors=[xz_vector, (d.norm().x(), d.norm().y(), 0)],
+            ac_vector, ac_vector_length, origin = self.get_affine_slice_params(data, img, rotation)
+            rgn = fn.affineSlice(data, shape=(int(ac_vector_length), int(d.length())),
+                                 vectors=[ac_vector, (d.norm().x(), d.norm().y(), 0)],
                                  origin=origin, axes=axes, order=order,
                                  returnCoords=returnMappedCoords, **kwds) 
+            
+            # Save vector and origin
+            self.origin = origin
+            self.ac_vector = ac_vector * ac_vector_length
         else:
             rgn = fn.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes, order=order, returnCoords=returnMappedCoords, **kwds)
             # Save vector and origin
-            self.xz_vector = (0, 0, data.shape[0])
+            self.ac_vector = (0, 0, data.shape[0])
             self.origin = (o.x(), o.y(), 0.0) 
         
         # save this as well
-        self.xy_vector = (d.x(), d.y(), 0)
-        self.angle2 = rotation
+        self.ab_vector = (d.x(), d.y(), 0)
+        self.ac_angle = rotation
         
         return rgn
 
@@ -836,24 +875,53 @@ class RulerROI(pg.ROI):
         left_corner = self.mapToItem(img, h4.pos())
         
         if counter_clockwise:
-            origin = pg.Point(origin_roi.x(), origin_roi.y())
-            end_point = pg.Point(left_corner.x(), data.shape[0] + origin_roi.y())
-            new_vector = end_point - origin
-            diff_y = left_corner.y() - origin_roi.y() 
+            origin = np.array([origin_roi.x(), origin_roi.y(), 0])
+            end_point = np.array([left_corner.x(), left_corner.y(), data.shape[0]])
         else:
-            origin = pg.Point(left_corner.x(), left_corner.y())  
-            end_point = pg.Point(origin_roi.x(), data.shape[0] + left_corner.y())
-            new_vector = end_point - left_corner
-            diff_y = origin_roi.y() - origin.y()
- 
-        xz_vector_length = math.sqrt((new_vector.x() * new_vector.x()) + (new_vector.y() * new_vector.y()) + (diff_y * diff_y))
-        xz_vector = (new_vector.x() / xz_vector_length, diff_y/xz_vector_length, new_vector.y()/xz_vector_length)
+            origin = np.array([left_corner.x(), left_corner.y(), 0])
+            end_point = np.array([origin_roi.x(), origin_roi.y(), data.shape[0]])
+
+        new_vector = end_point - origin
+        ac_vector_length = np.sqrt(new_vector.dot(new_vector))
         
-        # Save vector and origin
-        self.xz_vector = (new_vector.x(), diff_y, new_vector.y())
-        self.origin = (origin.x(), origin.y(), 0)
+        return (new_vector[0], new_vector[1], new_vector[2]) / ac_vector_length, ac_vector_length, (origin[0], origin[1], origin[2])
+    
+    def get_roi_size(self, ab_vector, ac_vector):
+        """
+        Returns the size of the ROI expected from the given vectors.
+        """
+        # Find the width
+        w = pg.Point(ab_vector[0], ab_vector[1]) 
+    
+        # Find the length
+        l = pg.Point(ac_vector[0], ac_vector[1])
         
-        return xz_vector, xz_vector_length, self.origin
+        return w.length(), l.length()
+    
+    def get_ab_angle(self, with_ab_vector=None):
+        """
+        Gets ROI.ab_angle. If with_ab_vector is given, then the angle returned is with respect to the given vector 
+        """
+        if with_ab_vector is not None:
+            corner = pg.Point(with_ab_vector[0], with_ab_vector[1])
+            return corner.angle(pg.Point(1, 0))
+        else:
+            return self.ab_angle
+        
+    def get_ac_angle(self, with_ac_vector=None):
+        """
+        Gets ROI.ac_angle. If with_ac_vector is given, then the angle returned is with respect to the given vector 
+        """
+        if with_ac_vector is not None:
+            l = pg.Point(with_ac_vector[0], with_ac_vector[1])  # Explain this. 
+            corner = pg.Point(l.length(), with_ac_vector[2])
+            
+            if with_ac_vector[0] < 0:  # Make sure this points to the correct direction 
+                corner = pg.Point(-l.length(), with_ac_vector[2])
+            
+            return pg.Point(0, 1).angle(corner)
+        else:
+            return self.ac_angle
 
 
 class Target(pg.GraphicsObject):
