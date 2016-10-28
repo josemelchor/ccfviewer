@@ -593,6 +593,35 @@ class VolumeSliceView(QtGui.QWidget):
         self.layout.addWidget(self.lut, 0, 1, 3, 1)
 
         self.clipboard = QtGui.QApplication.clipboard()
+        
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+Up"), self, self.slider_up)
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+Down"), self, self.slider_down)
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+Left"), self, self.tilt_left)
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+Right"), self, self.tilt_right)
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+1"), self, self.move_left)
+        QtGui.QShortcut(QtGui.QKeySequence("Alt+2"), self, self.move_right)
+
+    def slider_up(self):
+        self.slider.triggerAction(QtGui.QAbstractSlider.SliderSingleStepAdd)
+        
+    def slider_down(self):
+        self.slider.triggerAction(QtGui.QAbstractSlider.SliderSingleStepSub)
+        
+    def tilt_left(self):
+        self.line_roi.rotate(1)
+        
+    def tilt_right(self):
+        self.line_roi.rotate(-1)
+        
+    def move_right(self):
+        # print '-- Pos'
+        # print self.line_roi.pos()
+        self.line_roi.setPos((self.line_roi.pos().x() + .0001, self.line_roi.pos().y()))
+        
+    def move_left(self):
+        # print '-- Pos'
+        # print self.line_roi.pos()
+        self.line_roi.setPos((self.line_roi.pos().x() - .0001, self.line_roi.pos().y()))
 
     def setData(self, atlas, label, scale=None):
         if np.isscalar(scale):
