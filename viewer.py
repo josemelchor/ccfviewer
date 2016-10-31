@@ -158,6 +158,9 @@ class AtlasViewer(QtGui.QWidget):
         axis = self.displayCtrl.params['Orientation']
         vxsize = self.atlas._info[-1]['vxsize'] * 1e6
         z_axis_rotated = self.view.slider.value() != 0
+        
+        # find real lims id
+        lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == mouse_point[1]).next()
 
         if z_axis_rotated:  
             p1 = self.view.mappedCoords[0][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
@@ -184,14 +187,14 @@ class AtlasViewer(QtGui.QWidget):
             p3 = (self.view.atlas.shape[0] - p3) * vxsize
         
         if axis == 'right':
-            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(mouse_point[1])
-            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(mouse_point[1])
+            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
+            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(lims_str_id)
         elif axis == 'anterior':
-            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(mouse_point[1])
-            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(mouse_point[1])
+            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
+            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(lims_str_id)
         elif axis == 'dorsal':
-            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(mouse_point[1])
-            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(mouse_point[1])
+            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
+            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(lims_str_id)
         else:
             point = 'N/A'
             clipboard_text = 'NULL'
@@ -334,9 +337,6 @@ class AtlasViewer(QtGui.QWidget):
         p2 = (np.linalg.norm(ab_vector) / vxsize * img_location[0]) * self.view.scale[0]
         
         return p1, p2
-        
-    # def st_to_tuple(self, pos):
-    #     return literal_eval(pos)
     
 
 class CoordinatesCtrl(QtGui.QWidget):
@@ -1197,14 +1197,15 @@ if __name__ == '__main__':
             atlas = readNRRDAtlas()
             writeFile(atlas, atlasFile)
         except:
-            try:
-                print "Unexpected error when creating ccf.ma file with " + atlasFile
-                print traceback.print_exc()
-                raise
-            finally:
-                print "Removing ccf.ma"
-                if os.path.isfile(atlasFile):
+            print "Unexpected error when creating ccf.ma file with " + atlasFile
+            if os.path.isfile(atlasFile):
+                try:
+                    print "Removing ccf.ma"
                     os.remove(atlasFile)
+                except:
+                    print "Error removing ccf.ma:"
+                    sys.excepthook(*sys.exc_info())
+            raise   
 
     if os.path.isfile(labelFile):
         label = metaarray.MetaArray(file=labelFile, readAllData=True)
@@ -1212,17 +1213,19 @@ if __name__ == '__main__':
         try:
             label = readNRRDLabels()
             writeFile(label, labelFile)
-        except:
-            try:
-                print "Unexpected error when creating ccf_label.ma file with " + labelFile
-                print traceback.print_exc()
-                raise
-            finally:
-                print "Removing ccf.ma and ccf_label.ma files..."
-                if os.path.isfile(atlasFile):
-                    os.remove(atlasFile)
-                if os.path.isfile(labelFile):
-                    os.remove(labelFile)
+        except:     
+            print "Unexpected error when creating ccf_label.ma file with " + labelFile
+            if os.path.isfile(labelFile):
+                try:
+                    print "Removing ccf.ma and ccf_label.ma files..."
+                    if os.path.isfile(atlasFile):
+                        os.remove(atlasFile)
+                    if os.path.isfile(labelFile):
+                        os.remove(labelFile)
+                except:
+                    print "Error removing ccf.ma and ccf_label.ma:"
+                    sys.excepthook(*sys.exc_info())
+            raise 
 
     v.setAtlas(atlas)
     v.setLabels(label)
