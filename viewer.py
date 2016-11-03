@@ -156,36 +156,29 @@ class AtlasViewer(QtGui.QWidget):
     def getCcfPoint(self, mouse_point):
 
         axis = self.displayCtrl.params['Orientation']
-        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
-        z_axis_rotated = self.view.slider.value() != 0
-        
+
         # find real lims id
         lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == mouse_point[1]).next()
-
-        if z_axis_rotated:  
-            p1 = self.view.mappedCoords[0][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
-            p2 = self.view.mappedCoords[1][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
-            p3 = self.view.mappedCoords[2][mouse_point[0].pos().x()][mouse_point[0].pos().y()]
-        else:
-            p1 = self.view.mappedCoords[0][int(mouse_point[0].pos().y())]
-            p2 = self.view.mappedCoords[1][int(mouse_point[0].pos().y())]
-            p3 = mouse_point[0].pos().x()
         
-        # check ccf bounds, change to PIR orientation if within bounds
-        if p1 > self.view.atlas.shape[1] or p1 < 0:
-            p1 = 'N/A'
-        else:
-            p1 = (self.view.atlas.shape[1] - p1) * vxsize
-        if p2 > self.view.atlas.shape[2] or p2 < 0:
-            p2 = 'N/A'
-        else:
-            p2 = (self.view.atlas.shape[2] - p2) * vxsize
-
-        if p3 > self.view.atlas.shape[0] or p3 < 0:
-            p3 = 'N/A'
-        else:
-            p3 = (self.view.atlas.shape[0] - p3) * vxsize
+        # compute the 4x4 transform matrix
+        a = self.scale_point_to_CCF(self.view.line_roi.origin)
+        ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
+        ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
         
+        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
+
+        # Find what the mouse point position is relative to the coordinate
+        ab_length = np.linalg.norm(self.view.line_roi.ab_vector)
+        ac_length = np.linalg.norm(self.view.line_roi.ac_vector)        
+        p = (mouse_point[0].pos().x()/ac_length, mouse_point[0].pos().y()/ab_length)
+        
+        ccf_location = np.dot(M0i, [p[1], p[0], 0, 1]) # use the inverse transform matrix and the mouse point
+        
+        # These should be x, y, z
+        p1 = float(ccf_location[0])
+        p2 = float(ccf_location[1])
+        p3 = float(ccf_location[2])
+
         if axis == 'right':
             point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
             clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(lims_str_id)
@@ -198,20 +191,13 @@ class AtlasViewer(QtGui.QWidget):
         else:
             point = 'N/A'
             clipboard_text = 'NULL'
-            
-        # compute the 4x4 transform matrix
-        a = self.scale_point_to_CCF(self.view.line_roi.origin)
-        ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
-        ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
 
-        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
-
-        # build the LIMS dictionary
+        # Convert matrix transform to a LIMS dictionary
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
-        
+
         # These are just for testing
         # roi_origin_position = (self.view.line_roi.pos().x(), self.view.line_roi.pos().y())
-        # roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())  
+        # roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())
         # roi_params = "{};{};{};{};{};{};{};{};{}".format(ob, roi_origin_position, roi_size, self.view.line_roi.ab_angle,
         #                                                  self.view.line_roi.ac_angle, axis, self.view.line_roi.origin,
         #                                                  self.view.line_roi.ab_vector, self.view.line_roi.ac_vector)
@@ -219,7 +205,7 @@ class AtlasViewer(QtGui.QWidget):
         # clipboard_text = "{};{}".format(clipboard_text, roi_params)
         clipboard_text = "{};{}".format(clipboard_text, ob)
 
-        return point, clipboard_text  # TODO: output json(?)
+        return point, clipboard_text
     
     def scale_point_to_CCF(self, point):
         """
@@ -656,10 +642,10 @@ class VolumeSliceView(QtGui.QWidget):
             return
 
         if rotation == 0:
-            atlas, self.mappedCoords = self.line_roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1, 2), returnMappedCoords=True)
+            atlas = self.line_roi.getArrayRegion(self.atlas, self.img1.atlasImg, axes=(1, 2))
             label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, axes=(1, 2), order=0)
         else:
-            atlas, self.mappedCoords = self.line_roi.getArrayRegion(self.atlas, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), returnMappedCoords=True)
+            atlas = self.line_roi.getArrayRegion(self.atlas, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0))
             label = self.line_roi.getArrayRegion(self.label, self.img1.atlasImg, rotation=rotation, axes=(1, 2, 0), order=0)
 
         if atlas.size == 0:
@@ -832,6 +818,7 @@ class RulerROI(pg.ROI):
         self.addTranslateHandle([0.5, 0.5])
         self.addFreeHandle([0, 1], [0, 0])  
         self.addFreeHandle([0, 0], [0, 0])
+        self.newRoi = pg.ROI((0, 0), [1, 5], parent=self, pen=pg.mkPen('w', style=QtCore.Qt.DotLine))
 
     def paint(self, p, *args):
         pg.ROI.paint(self, p, *args)
@@ -852,11 +839,23 @@ class RulerROI(pg.ROI):
         pos = 0.5 * (p1 + p2) + pvecT * 40 / pvecT.length()
 
         angle = pg.Point(1, 0).angle(pg.Point(pvec)) 
-        self.ab_angle = angle  # TODO: Try to set this somewhere else
+        self.ab_angle = angle
+        
+        # Overlay a line to signal which side of the ROI is the back.
+        if self.ac_angle > 0:
+            self.newRoi.setVisible(True)
+            self.newRoi.setPos(h5.pos())
+        elif self.ac_angle < 0:
+            self.newRoi.setVisible(True)
+            self.newRoi.setPos(h4.pos())
+        else:
+            self.newRoi.setVisible(False)
+            
+        self.newRoi.setSize(pg.Point(self.size()[0], 0))
         
         p.resetTransform()
 
-        txt = pg.siFormat(length, suffix='m') + '\n%0.1f deg' % angle
+        txt = pg.siFormat(length, suffix='m') + '\n%0.1f deg' % angle + '\n%0.1f deg' % self.ac_angle
         p.drawText(QtCore.QRectF(pos.x() - 50, pos.y() - 50, 100, 100), QtCore.Qt.AlignCenter | QtCore.Qt.AlignVCenter, txt)
 
     def boundingRect(self):
@@ -864,7 +863,7 @@ class RulerROI(pg.ROI):
         pxw = 50 * self.pixelLength(pg.Point([1, 0]))
         return r.adjusted(-50, -50, 50, 50)
 
-    def getArrayRegion(self, data, img, axes=(0, 1), order=1, returnMappedCoords=False, rotation=0, **kwds):
+    def getArrayRegion(self, data, img, axes=(0, 1), order=1, rotation=0, **kwds):
 
         imgPts = [self.mapToItem(img, h.pos()) for h in self.getHandles()]
 
@@ -873,16 +872,14 @@ class RulerROI(pg.ROI):
        
         if rotation != 0:
             ac_vector, ac_vector_length, origin = self.get_affine_slice_params(data, img, rotation)
-            rgn = fn.affineSlice(data, shape=(int(ac_vector_length), int(d.length())),
-                                 vectors=[ac_vector, (d.norm().x(), d.norm().y(), 0)],
-                                 origin=origin, axes=axes, order=order,
-                                 returnCoords=returnMappedCoords, **kwds) 
+            rgn = fn.affineSlice(data, shape=(int(ac_vector_length), int(d.length())), vectors=[ac_vector, (d.norm().x(), d.norm().y(), 0)],
+                                 origin=origin, axes=axes, order=order, **kwds) 
             
             # Save vector and origin
             self.origin = origin
             self.ac_vector = ac_vector * ac_vector_length
         else:
-            rgn = fn.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes, order=order, returnCoords=returnMappedCoords, **kwds)
+            rgn = fn.affineSlice(data, shape=(int(d.length()),), vectors=[pg.Point(d.norm())], origin=o, axes=axes, order=order, **kwds)
             # Save vector and origin
             self.ac_vector = (0, 0, data.shape[0])
             self.origin = (o.x(), o.y(), 0.0) 
