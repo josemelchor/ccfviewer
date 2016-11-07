@@ -259,7 +259,7 @@ class AtlasViewer(QtGui.QWidget):
     # orientation = coord_args[9]    
     def coordinateSubmitted(self):
         if self.displayCtrl.params['Orientation'] != "right":
-            print 'Set Coordinate function is only supported with Right orientation'
+            displayError('Set Coordinate function is only supported with Right orientation')
             return
         
         coord_args = str(self.coordinateCtrl.line.text()).split(';')
@@ -348,8 +348,7 @@ class CoordinatesCtrl(QtGui.QWidget):
         if not errors:
             self.coordinateSubmitted.emit()
         else:
-            print '-- Errors'
-            print errors
+            displayError(errors)
             
     def validate_location(self):
         location = self.line.text()
@@ -996,6 +995,7 @@ def readNRRDAtlas(nrrdFile=None):
     """
     import nrrd
     if nrrdFile is None:
+        displayMessage('Please Select NRRD Atlas File')
         nrrdFile = QtGui.QFileDialog.getOpenFileName(None, "Select NRRD atlas file")
 
     with pg.BusyCursor():
@@ -1041,9 +1041,11 @@ def readNRRDLabels(nrrdFile=None, ontologyFile=None):
 
     import nrrd
     if nrrdFile is None:
+        displayMessage('Select NRRD annotation file')
         nrrdFile = QtGui.QFileDialog.getOpenFileName(None, "Select NRRD annotation file")
 
     if ontologyFile is None:
+        displayMessage('Select ontology file (json)')
         ontoFile = QtGui.QFileDialog.getOpenFileName(None, "Select ontology file (json)")
 
     with pg.ProgressDialog("Loading annotation file...", 0, 5, wait=0) as dlg:
@@ -1135,6 +1137,20 @@ def writeFile(data, file):
     else:
         data.write(file)
 
+
+def displayError(error):
+    print error
+    err = QtGui.QErrorMessage()
+    err.showMessage(error)
+    err.exec_()
+
+
+def displayMessage(message):
+    box = QtGui.QMessageBox()
+    box.setIcon(QtGui.QMessageBox.Information)
+    box.setText(message)
+    box.setStandardButtons(QtGui.QMessageBox.Ok)
+    box.exec_()
 
 ####### Stolen from ACQ4; not in mainline pyqtgraph yet #########
 
