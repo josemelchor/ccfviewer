@@ -61,6 +61,7 @@ class AtlasViewer(QtGui.QWidget):
         
         self.coordinateCtrl = CoordinatesCtrl(self)
         self.coordinateCtrl.coordinateSubmitted.connect(self.coordinateSubmitted)
+        self.coordinateCtrl.setLabelsSubmitted.connect(self.setLabelsSubmitted)
         self.ctrlLayout.addWidget(self.coordinateCtrl)
 
     def setLabels(self, label):
@@ -321,10 +322,17 @@ class AtlasViewer(QtGui.QWidget):
         p2 = (np.linalg.norm(ab_vector) / vxsize * img_location[0]) * self.view.scale[0]
         
         return p1, p2
+
+    def setLabelsSubmitted(self):
+        self.view.target.showLabel = not self.view.target.showLabel
+        # print '-- label submitted'
+        # print self.view.target.showLabel
+        self.view.w2.viewport().repaint()
     
 
 class CoordinatesCtrl(QtGui.QWidget):
     coordinateSubmitted = QtCore.Signal()
+    setLabelsSubmitted = QtCore.Signal()
     
     def __init__(self, parent=None):
         QtGui.QWidget.__init__(self, parent)
@@ -388,7 +396,8 @@ class CoordinatesCtrl(QtGui.QWidget):
         return error
     
     def display_labels(self):
-        displayMessage('This is a test')
+        self.setLabelsSubmitted.emit()
+        # displayMessage('This is a test')
         
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
     def __init__(self, parent=None):
@@ -968,6 +977,7 @@ class Target(pg.GraphicsObject):
         self.color = (255, 255, 0)
         self.labelAngle = 0
         self.label = "N/A TESt TEST"
+        self.showLabel = False
 
     def boundingRect(self):
         w = self.pixelLength(pg.Point(1, 0))
@@ -995,7 +1005,7 @@ class Target(pg.GraphicsObject):
         p.drawLine(pg.Point(-w*2, 0), pg.Point(w*2, 0))
         p.drawLine(pg.Point(0, -h*2), pg.Point(0, h*2))
         
-        if self.label is not None:
+        if self.showLabel:
             angle = self.labelAngle * np.pi / 180.
             pos = p.transform().map(QtCore.QPointF(0, 0)) + 15 * QtCore.QPointF(np.cos(angle), -np.sin(angle))
             # pos = p.transform().map(QtCore.QPointF(0, 0))
