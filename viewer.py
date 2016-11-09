@@ -250,68 +250,66 @@ class AtlasViewer(QtGui.QWidget):
                      (vector[1] / vxsize) * self.view.scale[1],
                      (vector[2] / vxsize) * self.view.scale[1])  
         return new_point
-      
-    # These are here to test. Add to coord_arg to test
-    # to_pos = self.st_to_tuple(coord_args[5])
-    # to_size = self.st_to_tuple(coord_args[6])
-    # to_ab_angle = float(coord_args[7])
-    # to_ac_angle = float(coord_args[8])
-    # orientation = coord_args[9]    
+  
     def coordinateSubmitted(self):
-        if self.displayCtrl.params['Orientation'] != "right":
-            displayError('Set Coordinate function is only supported with Right orientation')
-            return
-        
-        coord_args = str(self.coordinateCtrl.line.text()).split(';')
-        
-        vxsize = self.atlas._info[-1]['vxsize'] * 1e6
-        x = float(coord_args[0])
-        y = float(coord_args[1])
-        z = float(coord_args[2])
-        
-        if len(coord_args) < 3:
-            return
-        
-        if len(coord_args) <= 4:
-            # When only 4 points are given, assume point needs to be set using orientation == 'right'
-            translated_x = (self.view.atlas.shape[1] - (float(coord_args[0])/vxsize)) * self.view.scale[0] 
-            translated_y = (self.view.atlas.shape[2] - (float(coord_args[1])/vxsize)) * self.view.scale[0] 
-            translated_z = (self.view.atlas.shape[0] - (float(coord_args[2])/vxsize)) * self.view.scale[0] 
-            roi_origin = (translated_x, 0.0)
-            to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0) 
-            to_ab_angle = 90
-            to_ac_angle = 0
-            target_p1 = translated_z 
-            target_p2 = translated_y
-        else:
-            transform = literal_eval(coord_args[4])
-
-            # Use LIMS matrices to get the origin and vectors of the plane
-            M1, M1i = points_to_aff.lims_obj_to_aff(transform)
-            origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
+        try:
+            if self.displayCtrl.params['Orientation'] != "right":
+                displayError('Set Coordinate function is only supported with Right orientation')
+                return
             
-            target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
+            coord_args = str(self.coordinateCtrl.line.text()).split(';')
             
-            # Put the origin and vectors back to view coordinates
-            roi_origin = np.array(self.ccf_point_to_view(origin))
-            ab_vector = -np.array(self.vector_to_view(ab_vector))
-            ac_vector = -np.array(self.vector_to_view(ac_vector))
+            vxsize = self.atlas._info[-1]['vxsize'] * 1e6
+            x = float(coord_args[0])
+            y = float(coord_args[1])
+            z = float(coord_args[2])
+            
+            if len(coord_args) < 3:
+                return
+            
+            if len(coord_args) <= 4:
+                # When only 4 points are given, assume point needs to be set using orientation == 'right'
+                translated_x = (self.view.atlas.shape[1] - (float(coord_args[0])/vxsize)) * self.view.scale[0] 
+                translated_y = (self.view.atlas.shape[2] - (float(coord_args[1])/vxsize)) * self.view.scale[0] 
+                translated_z = (self.view.atlas.shape[0] - (float(coord_args[2])/vxsize)) * self.view.scale[0] 
+                roi_origin = (translated_x, 0.0)
+                to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0) 
+                to_ab_angle = 90
+                to_ac_angle = 0
+                target_p1 = translated_z 
+                target_p2 = translated_y
+            else:
+                transform = literal_eval(coord_args[4])
+    
+                # Use LIMS matrices to get the origin and vectors of the plane
+                M1, M1i = points_to_aff.lims_obj_to_aff(transform)
+                origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
                 
-            to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
-            
-            # Where the origin of the ROI should be
-            if to_ac_angle > 0:
-                roi_origin = ac_vector + roi_origin  
+                target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
                 
-            to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
-            to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
-        
-        self.view.target.setPos(target_p1, target_p2)
-        self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
-        self.view.line_roi.setSize(pg.Point(to_size))
-        self.view.line_roi.setAngle(to_ab_angle) 
-        self.view.slider.setValue(int(to_ac_angle))
-        self.view.target.setVisible(True)  # TODO: keep target visible when coming back to the same slice... how?
+                # Put the origin and vectors back to view coordinates
+                roi_origin = np.array(self.ccf_point_to_view(origin))
+                ab_vector = -np.array(self.vector_to_view(ab_vector))
+                ac_vector = -np.array(self.vector_to_view(ac_vector))
+                    
+                to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
+                
+                # Where the origin of the ROI should be
+                if to_ac_angle > 0:
+                    roi_origin = ac_vector + roi_origin  
+                    
+                to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
+                to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
+            
+            self.view.target.setPos(target_p1, target_p2)
+            self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
+            self.view.line_roi.setSize(pg.Point(to_size))
+            self.view.line_roi.setAngle(to_ab_angle) 
+            self.view.slider.setValue(int(to_ac_angle))
+            self.view.target.setVisible(True)  # TODO: keep target visible when coming back to the same slice... how?
+    
+        except:
+            displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
        
     def get_target_position(self, ccf_location, M, ab_vector, ac_vector, vxsize):
         """
@@ -342,6 +340,10 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.btn = QtGui.QPushButton('Set Coordinate', self)
         self.layout.addWidget(self.btn, 1, 0)
         self.btn.clicked.connect(self.set_coordinate)
+        
+        self.labels_btn = QtGui.QPushButton('Display Labels', self)
+        self.layout.addWidget(self.labels_btn, 2, 0)
+        self.labels_btn.clicked.connect(self.display_labels)
     
     def set_coordinate(self):
         errors = self.validate_location()
@@ -352,8 +354,15 @@ class CoordinatesCtrl(QtGui.QWidget):
             
     def validate_location(self):
         location = self.line.text()
+        errors = ""
         if location:
             tokens = str(self.line.text()).split(';')
+            
+            for i, token in enumerate(tokens):
+                if not token:
+                    errors += "Error: String has empty field. Please review field {}".format(i+1)
+                    return errors
+            
             if len(tokens) < 3:
                 return "Coordinate is malformed"
             elif len(tokens) == 3 or len(tokens) == 4:
@@ -378,6 +387,8 @@ class CoordinatesCtrl(QtGui.QWidget):
         
         return error
     
+    def display_labels(self):
+        displayMessage('This is a test')
         
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
     def __init__(self, parent=None):
@@ -652,8 +663,8 @@ class VolumeSliceView(QtGui.QWidget):
         
         self.img2.setData(atlas, label, scale=self.scale)
         self.view2.autoRange(items=[self.img2.atlasImg])
-        self.target.setVisible(False)
-        self.w1.viewport().repaint()  # repaint immediately to avoid processing more mouse events before next repaint
+        self.target.setVisible(False)  # If this line is commented out, then the Target will stay in place...
+        self.w1.viewport().repaint() # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
         
     def sliderRotation(self):
@@ -952,24 +963,20 @@ class RulerROI(pg.ROI):
 class Target(pg.GraphicsObject):
     def __init__(self, movable=True):
         pg.GraphicsObject.__init__(self)
+        self.movable = movable
         self._bounds = None
         self.color = (255, 255, 0)
+        self.labelAngle = 0
+        self.label = "N/A TESt TEST"
 
     def boundingRect(self):
-        if self._bounds is None:
-            # too slow!
-            w = self.pixelLength(pg.Point(1, 0))
-            if w is None:
-                return QtCore.QRectF()
-            h = self.pixelLength(pg.Point(0, 1))
-            # o = self.mapToScene(QtCore.QPointF(0, 0))
-            # w = abs(1.0 / (self.mapToScene(QtCore.QPointF(1, 0)) - o).x())
-            # h = abs(1.0 / (self.mapToScene(QtCore.QPointF(0, 1)) - o).y())
-            self._px = (w, h)
-            w *= 21
-            h *= 21
-            self._bounds = QtCore.QRectF(-w, -h, w*2, h*2)
-        return self._bounds
+        w = self.pixelLength(pg.Point(1, 0))
+        if w is None:
+            return QtCore.QRectF()
+        w *= 25
+        h = 25 * self.pixelLength(pg.Point(0, 1))
+        r = QtCore.QRectF(-w*2, -h*2, w*4, h*4)
+        return r
 
     def viewTransformChanged(self):
         self._bounds = None
@@ -977,7 +984,8 @@ class Target(pg.GraphicsObject):
 
     def paint(self, p, *args):
         p.setRenderHint(p.Antialiasing)
-        px, py = self._px
+        px = self.pixelLength(pg.Point(1, 0))
+        py = self.pixelLength(pg.Point(0, 1))
         w = 4 * px
         h = 4 * py
         r = QtCore.QRectF(-w, -h, w*2, h*2)
@@ -986,6 +994,13 @@ class Target(pg.GraphicsObject):
         p.drawEllipse(r)
         p.drawLine(pg.Point(-w*2, 0), pg.Point(w*2, 0))
         p.drawLine(pg.Point(0, -h*2), pg.Point(0, h*2))
+        
+        if self.label is not None:
+            angle = self.labelAngle * np.pi / 180.
+            pos = p.transform().map(QtCore.QPointF(0, 0)) + 15 * QtCore.QPointF(np.cos(angle), -np.sin(angle))
+            # pos = p.transform().map(QtCore.QPointF(0, 0))
+            p.resetTransform()
+            p.drawText(QtCore.QRectF(pos.x()-10, pos.y()-10, 200, 20), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, self.label)
         
 
 def readNRRDAtlas(nrrdFile=None):
