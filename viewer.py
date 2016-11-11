@@ -258,30 +258,28 @@ class AtlasViewer(QtGui.QWidget):
             
             if "transform" in location["slice_specimen"].keys() and location["slice_specimen"]["transform"]:
                 transform = location["slice_specimen"]["transform"]
-                # Use LIMS matrices to get the origin and vectors of the plane
+                # Get transform matrix
                 M1, M1i = points_to_aff.lims_obj_to_aff(transform)
-                origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
-                
-                # target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
-                
-                # Put the origin and vectors back to view coordinates
-                roi_origin = np.array(self.ccf_point_to_view(origin))
-                ab_vector = -np.array(self.vector_to_view(ab_vector))
-                ac_vector = -np.array(self.vector_to_view(ac_vector))
-                    
+                # Get origin, and vectors in ccf coordinates
+                ccf_origin, ccf_ab_vector, ccf_ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
+                # Get origin and vectors back in view coordinates
+                roi_origin = np.array(self.ccf_point_to_view(ccf_origin))
+                ab_vector = -np.array(self.vector_to_view(ccf_ab_vector))
+                ac_vector = -np.array(self.vector_to_view(ccf_ac_vector))
+
                 to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
-                
+
                 # Where the origin of the ROI should be
                 if to_ac_angle > 0:
-                    roi_origin = ac_vector + roi_origin  
-                    
+                    roi_origin = ac_vector + roi_origin
+
                 to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
                 to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
             else:
                 transform = None
                 if not location["slice_specimen"]["cells"]:
                     return
-                
+
             if location["slice_specimen"]["cells"]:
                 
                 cell = location["slice_specimen"]["cells"].itervalues().next()  # Only handling one cell for now
@@ -290,13 +288,8 @@ class AtlasViewer(QtGui.QWidget):
                 z = float(cell['ccf_coordinate'][2])
                 cell_name = cell['name']  # TODO: make sure to validate...
                 
-                if transform: # TODO: this is not working ugh..
-                    
-                    print 'setting target'
-                    print x
-                    print y
-                    print z
-                    target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
+                if transform:
+                    target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ccf_ab_vector, ccf_ac_vector, vxsize)
                 else:
                     # No transform given, place cell ignoring lineROI angles
                     translated_x = (self.view.atlas.shape[1] - (x/vxsize)) * self.view.scale[0] 
@@ -310,24 +303,23 @@ class AtlasViewer(QtGui.QWidget):
                     target_p2 = translated_y
                 
                 # set plane and cell
-                self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
-                self.view.line_roi.setSize(pg.Point(to_size))
-                self.view.line_roi.setAngle(to_ab_angle) 
-                self.view.slider.setValue(int(to_ac_angle))    
-                self.view.target.setLabel(cell_name)
-                self.view.target.setPos(target_p1, target_p2)
-                self.view.target.setVisible(True)
+                self.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
+                self.view.target.setTarget((target_p1, target_p2), name=cell_name)
                 return
-            
-            # Transform present but no cells defined, just set plane
-            self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
-            self.view.line_roi.setSize(pg.Point(to_size))
-            self.view.line_roi.setAngle(to_ab_angle) 
-            self.view.slider.setValue(int(to_ac_angle))
+
+            else:
+                # Transform present but no cells defined, just set plane
+                self.view.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
     
         except:
             displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
-       
+
+    def setPlane(self, pos, size, ab_angle, ac_angle):
+        self.view.line_roi.setPos(pos)
+        self.view.line_roi.setSize(size)
+        self.view.line_roi.setAngle(ab_angle)
+        self.view.slider.setValue(ac_angle)
+
     def get_target_position(self, ccf_location, M, ab_vector, ac_vector, vxsize):
         """
         Use affine transform matrix M to map ccf coordinate back to original coordinates  
@@ -1049,6 +1041,11 @@ class Target(pg.GraphicsObject):
             self.label = "N/A"
         else:
             self.label = l
+
+    def setTarget(self, pos, setVisible=True, name='N/A'):
+        self.setLabel(name)
+        self.setPos(pos[0], pos[1])
+        self.setVisible(setVisible)
 
     def boundingRect(self):
         w = self.pixelLength(pg.Point(1, 0))
