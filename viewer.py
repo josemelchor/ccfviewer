@@ -61,6 +61,7 @@ class AtlasViewer(QtGui.QWidget):
         self.coordinateCtrl = CoordinatesCtrl(self)
         self.coordinateCtrl.coordinateSubmitted.connect(self.coordinateSubmitted)
         self.coordinateCtrl.displayLabelsSubmitted.connect(self.displayLabelsSubmitted)
+        self.coordinateCtrl.copySubmitted.connect(self.copySubmitted)
         self.ctrlLayout.addWidget(self.coordinateCtrl)
 
     def setLabels(self, label):
@@ -148,13 +149,13 @@ class AtlasViewer(QtGui.QWidget):
         self.pointLabel.setText(point)
         self.view.target.setVisible(True)
         self.view.target.setPos(self.view.view2.mapSceneToView(mouse_point[0].scenePos()))
-        self.view.clipboard.setText(to_clipboard)
+        self.view.clipboard.setText(json.dumps(self.coordinateCtrl.location))
         self.view.w2.viewport().repaint()  # repaint right away to avoid having truncated cell/target labels
 
     # Get CCF point coordinate and Structure id
     # Returns two strings. One used for display in a label and the other to put in the clipboard
     # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right
-    def getCcfPoint(self, mouse_point):
+    def getCcfPoint(self, mouse_point):  # TODO: get text in json format
 
         axis = self.displayCtrl.params['Orientation']
 
@@ -183,6 +184,8 @@ class AtlasViewer(QtGui.QWidget):
         if axis == 'right':
             point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
             clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(lims_str_id)
+            self.coordinateCtrl.location["slice_specimen"]['cells'][123] = {"name": ".O1", "ccf_coordinate": [p1, p2, p3], "structure_id": str(lims_str_id)}
+            # self.coordinateCtrl.location["slice_specimen"]['cells'][123]["structure_id"] = str(lims_str_id)
         elif axis == 'anterior':
             point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
             clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(lims_str_id)
@@ -193,17 +196,9 @@ class AtlasViewer(QtGui.QWidget):
             point = 'N/A'
             clipboard_text = 'NULL'
 
-        # Convert matrix transform to a LIMS dictionary
+        # Convert matrix transform to a LIMS dictionary 
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
-
-        # These are just for testing
-        # roi_origin_position = (self.view.line_roi.pos().x(), self.view.line_roi.pos().y())
-        # roi_size = (self.view.line_roi.size().x(), self.view.line_roi.size().y())
-        # roi_params = "{};{};{};{};{};{};{};{};{}".format(ob, roi_origin_position, roi_size, self.view.line_roi.ab_angle,
-        #                                                  self.view.line_roi.ac_angle, axis, self.view.line_roi.origin,
-        #                                                  self.view.line_roi.ab_vector, self.view.line_roi.ac_vector)
-        
-        # clipboard_text = "{};{}".format(clipboard_text, roi_params)
+        self.coordinateCtrl.location["slice_specimen"]["transform"] = ob
         clipboard_text = "{};{}".format(clipboard_text, ob)
 
         return point, clipboard_text
@@ -259,19 +254,51 @@ class AtlasViewer(QtGui.QWidget):
                 return
             
             vxsize = self.atlas._info[-1]['vxsize'] * 1e6
-            locations = json.loads(str(self.coordinateCtrl.line.text()))
-            for location in locations:
-                # coord_args = str(self.coordinateCtrl.line.text()).split(';')
+            location = json.loads(str(self.coordinateCtrl.line.text()))
+            
+            if "transform" in location["slice_specimen"].keys() and location["slice_specimen"]["transform"]:
+                transform = location["slice_specimen"]["transform"]
+                # Use LIMS matrices to get the origin and vectors of the plane
+                M1, M1i = points_to_aff.lims_obj_to_aff(transform)
+                origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
                 
-                x = float(locations[location]['ccf_coordinate'][0])
-                y = float(locations[location]['ccf_coordinate'][1])
-                z = float(locations[location]['ccf_coordinate'][2])
+                # target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
                 
-                if len(locations[location]) < 3:
-                    pass
+                # Put the origin and vectors back to view coordinates
+                roi_origin = np.array(self.ccf_point_to_view(origin))
+                ab_vector = -np.array(self.vector_to_view(ab_vector))
+                ac_vector = -np.array(self.vector_to_view(ac_vector))
+                    
+                to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
                 
-                if len(locations[location]) <= 4:
-                    # When only 4 points are given, assume point needs to be set using orientation == 'right'
+                # Where the origin of the ROI should be
+                if to_ac_angle > 0:
+                    roi_origin = ac_vector + roi_origin  
+                    
+                to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
+                to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
+            else:
+                transform = None
+                if not location["slice_specimen"]["cells"]:
+                    return
+                
+            if location["slice_specimen"]["cells"]:
+                
+                cell = location["slice_specimen"]["cells"].itervalues().next()  # Only handling one cell for now
+                x = float(cell['ccf_coordinate'][0])
+                y = float(cell['ccf_coordinate'][1])
+                z = float(cell['ccf_coordinate'][2])
+                cell_name = cell['name']  # TODO: make sure to validate...
+                
+                if transform: # TODO: this is not working ugh..
+                    
+                    print 'setting target'
+                    print x
+                    print y
+                    print z
+                    target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
+                else:
+                    # No transform given, place cell ignoring lineROI angles
                     translated_x = (self.view.atlas.shape[1] - (x/vxsize)) * self.view.scale[0] 
                     translated_y = (self.view.atlas.shape[2] - (y/vxsize)) * self.view.scale[0] 
                     translated_z = (self.view.atlas.shape[0] - (z/vxsize)) * self.view.scale[0] 
@@ -281,36 +308,22 @@ class AtlasViewer(QtGui.QWidget):
                     to_ac_angle = 0
                     target_p1 = translated_z 
                     target_p2 = translated_y
-                else:
-                    transform = locations[location]['transform']
-        
-                    # Use LIMS matrices to get the origin and vectors of the plane
-                    M1, M1i = points_to_aff.lims_obj_to_aff(transform)
-                    origin, ab_vector, ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
-                    
-                    target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ab_vector, ac_vector, vxsize)
-                    
-                    # Put the origin and vectors back to view coordinates
-                    roi_origin = np.array(self.ccf_point_to_view(origin))
-                    ab_vector = -np.array(self.vector_to_view(ab_vector))
-                    ac_vector = -np.array(self.vector_to_view(ac_vector))
-                        
-                    to_ac_angle = self.view.line_roi.get_ac_angle(ac_vector)
-                    
-                    # Where the origin of the ROI should be
-                    if to_ac_angle > 0:
-                        roi_origin = ac_vector + roi_origin  
-                        
-                    to_size = self.view.line_roi.get_roi_size(ab_vector, ac_vector)
-                    to_ab_angle = self.view.line_roi.get_ab_angle(ab_vector)
                 
-                self.view.target.setLabel(locations[location]['name'])
-                self.view.target.setPos(target_p1, target_p2)
+                # set plane and cell
                 self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
                 self.view.line_roi.setSize(pg.Point(to_size))
                 self.view.line_roi.setAngle(to_ab_angle) 
-                self.view.slider.setValue(int(to_ac_angle))
-                self.view.target.setVisible(True)  # TODO: keep target visible when coming back to the same slice... how?
+                self.view.slider.setValue(int(to_ac_angle))    
+                self.view.target.setLabel(cell_name)
+                self.view.target.setPos(target_p1, target_p2)
+                self.view.target.setVisible(True)
+                return
+            
+            # Transform present but no cells defined, just set plane
+            self.view.line_roi.setPos(pg.Point(roi_origin[0], roi_origin[1]))
+            self.view.line_roi.setSize(pg.Point(to_size))
+            self.view.line_roi.setAngle(to_ab_angle) 
+            self.view.slider.setValue(int(to_ac_angle))
     
         except:
             displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
@@ -332,11 +345,32 @@ class AtlasViewer(QtGui.QWidget):
         """
         self.view.target.showLabel = not self.view.target.showLabel
         self.view.w2.viewport().repaint()
+        
+    def copySubmitted(self):
+        # Set coordinateCtrl location
+        transform = self.get_plane_transform()
+        self.coordinateCtrl.set_location(transform)
+        
+        # Copy location to clipboard
+        self.view.clipboard.setText(json.dumps(self.coordinateCtrl.location))
     
+    def get_plane_transform(self):
+        # compute the 4x4 transform matrix
+        a = self.scale_point_to_CCF(self.view.line_roi.origin)
+        ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
+        ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
+        
+        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
+
+        # Convert matrix transform to a LIMS dictionary
+        ob = points_to_aff.aff_to_lims_obj(M0, M0i)
+        return ob
+
 
 class CoordinatesCtrl(QtGui.QWidget):
     coordinateSubmitted = QtCore.Signal()
     displayLabelsSubmitted = QtCore.Signal()
+    copySubmitted = QtCore.Signal()
     
     def __init__(self, parent=None):
         QtGui.QWidget.__init__(self, parent)
@@ -363,7 +397,12 @@ class CoordinatesCtrl(QtGui.QWidget):
         
         self.copy_btn = QtGui.QPushButton('copy', self)
         self.layout.addWidget(self.copy_btn, 2, 2)
-        # self.copy_btn.clicked.connect(self.copy_to_clipboard)
+        self.copy_btn.clicked.connect(self.copy_to_clipboard)
+        
+        self.location = {"slice_specimen": {"lims_id": None,
+                                            "name": None,
+                                            "transform": {},
+                                            "cells": {}}}
     
     def set_coordinate(self):
         try:
@@ -374,6 +413,15 @@ class CoordinatesCtrl(QtGui.QWidget):
                 displayError(errors)
         except ValueError:
             displayError("Error Setting coordinate")
+    
+    def set_location(self, transform, cells=None):
+        
+        self.location["slice_specimen"]["transform"] = transform
+        
+        if cells:
+            self.location["slice_specimen"]["cells"] = cells
+        
+        print self.location
             
     def validate_location(self):
         # locations = self.line.text()
@@ -381,20 +429,17 @@ class CoordinatesCtrl(QtGui.QWidget):
         if not json_string:
             return "No coordinate provided"
         
-        locations = json.loads(str(self.line.text()))
+        location = json.loads(str(self.line.text()))
         
-        for location in locations:    
-            if location:
-                coords = locations[location]['ccf_coordinate']
-                
-                if len(coords) < 3:
-                    return "Coordinate is malformed"
-                else:
-                    errors = self.target_within_range(float(coords[0]), float(coords[1]), float(coords[2]))
-                    
-                return errors
+        for key, value in location['slice_specimen']['cells'].items():    
+            coords = value['ccf_coordinate']
+            
+            if len(coords) < 3:
+                return "Coordinate is malformed"
             else:
-                return "No coordinate provided"
+                errors = self.target_within_range(float(coords[0]), float(coords[1]), float(coords[2]))
+                
+            return errors
     
     def target_within_range(self, x, y, z):
 
@@ -414,6 +459,9 @@ class CoordinatesCtrl(QtGui.QWidget):
         Display labels of targets (representing cells) 
         """
         self.displayLabelsSubmitted.emit()
+        
+    def copy_to_clipboard(self):
+        self.copySubmitted.emit()
         
         
 class LabelDisplayCtrl(pg.parametertree.ParameterTree):
