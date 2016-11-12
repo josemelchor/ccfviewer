@@ -185,7 +185,6 @@ class AtlasViewer(QtGui.QWidget):
             point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
             clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(lims_str_id)
             self.coordinateCtrl.location["slice_specimen"]['cells'][123] = {"name": ".O1", "ccf_coordinate": [p1, p2, p3], "structure_id": str(lims_str_id)}
-            # self.coordinateCtrl.location["slice_specimen"]['cells'][123]["structure_id"] = str(lims_str_id)
         elif axis == 'anterior':
             point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
             clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(lims_str_id)
@@ -309,16 +308,16 @@ class AtlasViewer(QtGui.QWidget):
 
             else:
                 # Transform present but no cells defined, just set plane
-                self.view.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
+                self.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
     
         except:
             displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
 
     def setPlane(self, pos, size, ab_angle, ac_angle):
-        self.view.line_roi.setPos(pos)
-        self.view.line_roi.setSize(size)
         self.view.line_roi.setAngle(ab_angle)
         self.view.slider.setValue(ac_angle)
+        self.view.line_roi.setPos(pos)
+        self.view.line_roi.setSize(size)
 
     def get_target_position(self, ccf_location, M, ab_vector, ac_vector, vxsize):
         """
@@ -341,6 +340,8 @@ class AtlasViewer(QtGui.QWidget):
     def copySubmitted(self):
         # Set coordinateCtrl location
         transform = self.get_plane_transform()
+        
+        # TODO: Need Target.getCells()
         self.coordinateCtrl.set_location(transform)
         
         # Copy location to clipboard
@@ -412,6 +413,8 @@ class CoordinatesCtrl(QtGui.QWidget):
         
         if cells:
             self.location["slice_specimen"]["cells"] = cells
+        else:
+            self.location["slice_specimen"]["cells"] = {} 
         
         print self.location
             
@@ -662,6 +665,8 @@ class VolumeSliceView(QtGui.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence("Alt+Right"), self, self.tilt_right)
         QtGui.QShortcut(QtGui.QKeySequence("Alt+1"), self, self.move_left)
         QtGui.QShortcut(QtGui.QKeySequence("Alt+2"), self, self.move_right)
+        
+        self.cell_collection = []
 
     def slider_up(self):
         self.slider.triggerAction(QtGui.QAbstractSlider.SliderSingleStepAdd)
@@ -886,7 +891,7 @@ class RulerROI(pg.ROI):
         pg.ROI.__init__(self, pos, size, **args)
         self.ab_vector = (0, 0, 0)  # This is the vector pointing up/down from the origin
         self.ac_vector = (0, 0, 0)  # This is the vector pointing across form the orign
-        self.origin = (0, 0, 0)     # This is the origin
+        self.origin = (0, 0, 0)     
         self.ab_angle = 90  # angle on the ab_vector
         self.ac_angle = 0   # angle of the ac_vector 
         self.addRotateHandle([0, 0.5], [1, 1])
@@ -1035,6 +1040,7 @@ class Target(pg.GraphicsObject):
         self.labelAngle = 0
         self.label = "N/A"
         self.showLabel = False
+        self.ccf_coordinate = (0, 0, 0)
         
     def setLabel(self, l):
         if not l:
