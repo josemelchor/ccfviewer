@@ -61,6 +61,7 @@ class AtlasViewer(QtGui.QWidget):
         self.coordinateCtrl = CoordinatesCtrl(self)
         self.coordinateCtrl.coordinateSubmitted.connect(self.coordinateSubmitted)
         self.coordinateCtrl.displayLabelsSubmitted.connect(self.displayLabelsSubmitted)
+        self.coordinateCtrl.toggleSubmitted.connect(self.toggleSubmitted)
         self.coordinateCtrl.copySubmitted.connect(self.copySubmitted)
         self.ctrlLayout.addWidget(self.coordinateCtrl)
 
@@ -257,6 +258,7 @@ class AtlasViewer(QtGui.QWidget):
             location = json.loads(str(self.coordinateCtrl.line.text()))
             
             self.coordinateCtrl.set_location(location)
+            self.coordinateCtrl.set_cell_tree()
             
             if "transform" in location["slice_specimen"].keys() and location["slice_specimen"]["transform"]:
                 transform = location["slice_specimen"]["transform"]
@@ -307,10 +309,8 @@ class AtlasViewer(QtGui.QWidget):
                     to_ac_angle = 0
                     # target_p1 = translated_z 
                     # target_p2 = translated_y
-                
-                # set plane and cell
+
                 self.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
-                # self.view.target.setTarget((target_p1, target_p2), name=cell_name)  # TODO: this needs to work on cell_cluster
                 return
 
             else:
@@ -341,7 +341,6 @@ class AtlasViewer(QtGui.QWidget):
         """
         Display target labels  
         """
-        # self.view.target.showLabel = not self.view.target.showLabel  # TODO: this needs to work on cell_cluster
         self.view.display_Labels()
         self.view.w2.viewport().repaint()
         
@@ -366,11 +365,15 @@ class AtlasViewer(QtGui.QWidget):
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
         return ob
 
+    def toggleSubmitted(self, item):
+        self.view.hide_cell(item)
+
 
 class CoordinatesCtrl(QtGui.QWidget):
     coordinateSubmitted = QtCore.Signal()
     displayLabelsSubmitted = QtCore.Signal()
     copySubmitted = QtCore.Signal()
+    toggleSubmitted = QtCore.Signal(object)
     
     def __init__(self, parent=None):
         QtGui.QWidget.__init__(self, parent)
@@ -378,10 +381,15 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.setLayout(self.layout)
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.cell_table = QtGui.QTableWidget(self)
-        # self.cell_table.returnPressed.connect(self.set_coordinate)
-        self.layout.addWidget(self.cell_table, 0, 0, 1, 3)
+
+        self.cell_tree = QtGui.QTreeWidget(self)
+        self.layout.addWidget(self.cell_tree, 0, 0, 1, 3)
+        self.cell_tree.header().setResizeMode(QtGui.QHeaderView.ResizeToContents)
+        self.cell_tree.headerItem().setText(0, "Name")
+        self.cell_tree.headerItem().setText(1, "Structure")
+        self.cell_tree.headerItem().setText(2, "Position")
+        self.checked = set()
+        self.cell_tree.itemChanged.connect(self.itemChange)
         
         self.line = QtGui.QLineEdit(self)
         self.line.returnPressed.connect(self.set_coordinate)
@@ -403,7 +411,30 @@ class CoordinatesCtrl(QtGui.QWidget):
                                             "name": None,
                                             "transform": {},
                                             "cells": {}}}
-    
+
+    def itemChange(self, item):
+        self.toggleSubmitted.emit(item)
+
+    def set_cell_tree(self):
+
+        sp_slice = QtGui.QTreeWidgetItem([self.location['slice_specimen']['name'], '', ''])
+        self.cell_tree.clear()
+        self.cell_tree.addTopLevelItem(sp_slice)
+
+        for key, cell in self.location['slice_specimen']['cells'].items():
+            list1 = cell['ccf_coordinate']
+            coord = ', '.join(str(e) for e in list1)
+
+            if cell['structure_id'] is None:
+                structure = 'N/A'
+            else:
+                structure = str(cell['structure_id'])
+
+            c = QtGui.QTreeWidgetItem([cell['name'], structure, coord])
+            c.setFlags(c.flags() | QtCore.Qt.ItemIsUserCheckable)
+            c.setCheckState(0, QtCore.Qt.Checked)
+            sp_slice.addChild(c)
+
     def set_coordinate(self):
         try:
             errors = self.validate_location()
@@ -613,6 +644,7 @@ class LabelTree(QtGui.QWidget):
 
 class VolumeSliceView(QtGui.QWidget):
     mouseHovered = QtCore.Signal(object)
+    sigDragged = QtCore.Signal()
     # mouseClicked = QtCore.Signal(object)
 
     def __init__(self, parent=None):
@@ -646,11 +678,6 @@ class VolumeSliceView(QtGui.QWidget):
         # self.img2.mouseClicked.connect(self.mouseClicked)
         self.view1.addItem(self.img1)
         self.view2.addItem(self.img2)
-
-        # self.target = Target()
-        # self.target.setZValue(5000)
-        # self.view2.addItem(self.target)
-        # self.target.setVisible(False)
 
         self.line_roi = RulerROI([.005, 0], [.008, 0], angle=90, pen=(0, 9), movable=False)
         self.view1.addItem(self.line_roi, ignoreBounds=True)
@@ -703,6 +730,10 @@ class VolumeSliceView(QtGui.QWidget):
         
     def set_cell_cluster(self, cells):
         if self.cell_cluster:
+            # Remove any previous cells
+            for item in self.cell_cluster:
+                self.view2.removeItem(item)
+
             del self.cell_cluster[:]  
         
         self.cell_cluster = []
@@ -712,12 +743,15 @@ class VolumeSliceView(QtGui.QWidget):
             t.setLabel(value['name'])
             t.setCoordinate(value['ccf_coordinate'])
             t.setZValue(5000)
+            t.sigDragged.connect(self.targetDragged)
             self.view2.addItem(t)
             # t.setVisible(False)
             self.cell_cluster.append(t)
-            
-        print '-- cluster'
-        print self.cell_cluster
+
+    def targetDragged(self):
+        # Continue from here... Maybe I need to add another signal here in order to access AtlasViewer class. Or maybe I could do something like
+        #   updateSlice in this class...
+        print '-- target Dragged'
     
     def set_cell_cluster_positions(self, transform=None, vxsize=None):  # TODO: figure out how to get vxsize without passing as argument
         if not self.cell_cluster:
@@ -749,7 +783,17 @@ class VolumeSliceView(QtGui.QWidget):
             return
         
         for cell in self.cell_cluster:
-            cell.showLabel = not cell.showLabel  
+            cell.showLabel = not cell.showLabel
+
+    def hide_cell(self, item):
+
+        if not self.cell_cluster:
+            return
+
+        for cell in self.cell_cluster:
+            if item.text(0) == cell.label:
+                cell.setVisible(item.checkState(0) == QtCore.Qt.Checked)
+                self.w2.viewport().repaint()
 
     def setData(self, atlas, label, scale=None):
         if np.isscalar(scale):
@@ -1175,6 +1219,7 @@ class Target(pg.GraphicsObject):
     def hoverEvent(self, ev):
         if self.movable:
             ev.acceptDrags(QtCore.Qt.LeftButton)
+
 
 def readNRRDAtlas(nrrdFile=None):
     """
