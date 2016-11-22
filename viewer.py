@@ -35,6 +35,7 @@ class AtlasViewer(QtGui.QWidget):
         self.view = VolumeSliceView()
         self.view.mouseHovered.connect(self.mouseHovered)
         # self.view.mouseClicked.connect(self.mouseClicked)
+        self.view.targetReleased.connect(self.targetReleased)
         self.splitter.addWidget(self.view)
         
         self.statusLabel = QtGui.QLabel()
@@ -142,6 +143,11 @@ class AtlasViewer(QtGui.QWidget):
         self.glView.addItem(mesh)
 
         self.glView.show()
+     
+    def targetReleased(self, item):
+        print '-- This is in Atlas Viewer'
+        print '-- ITEM!!!!!!!!'
+        print item
      
     # mouse_point[0] contains the Point object.
     # mouse_point[1] contains the structure id at Point
@@ -644,8 +650,9 @@ class LabelTree(QtGui.QWidget):
 
 class VolumeSliceView(QtGui.QWidget):
     mouseHovered = QtCore.Signal(object)
-    sigDragged = QtCore.Signal()
+    sigDragged = QtCore.Signal(object)
     # mouseClicked = QtCore.Signal(object)
+    targetReleased = QtCore.Signal(object)
 
     def __init__(self, parent=None):
         self.atlas = None
@@ -743,15 +750,22 @@ class VolumeSliceView(QtGui.QWidget):
             t.setLabel(value['name'])
             t.setCoordinate(value['ccf_coordinate'])
             t.setZValue(5000)
+            t.setParentItem(self.img2)
             t.sigDragged.connect(self.targetDragged)
             self.view2.addItem(t)
             # t.setVisible(False)
             self.cell_cluster.append(t)
 
-    def targetDragged(self):
+    def targetDragged(self, item):
         # Continue from here... Maybe I need to add another signal here in order to access AtlasViewer class. Or maybe I could do something like
         #   updateSlice in this class...
-        print '-- target Dragged'
+        # print '-- target Dragged'
+        # 
+        # print '-- item'
+        # print item
+        
+        self.w2.viewport().repaint()
+        self.targetReleased.emit(item)
     
     def set_cell_cluster_positions(self, transform=None, vxsize=None):  # TODO: figure out how to get vxsize without passing as argument
         if not self.cell_cluster:
@@ -965,6 +979,8 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
             return
 
         try:
+            print '-- HOVER'
+            print event.pos()
             id = self.labelData[int(event.pos().x()), int(event.pos().y())]
         except IndexError, AttributeError:
             return
@@ -1214,7 +1230,17 @@ class Target(pg.GraphicsObject):
             self.setPos(self.cursorOffset + self.mapToParent(ev.pos()))
             if ev.isFinish():
                 self.moving = False
-                self.sigDragged.emit(self)
+                print '-- Drag event'
+                print self.pos().x()
+                print self.pos().y()
+                print '-- Event pos'
+                print ev.pos()
+                print ev.scenePos()
+                print ev.screenPos()
+                print self.mapToScene(self.pos())
+                print self.mapToParent(self.pos())
+                print self.parentItem()
+                self.sigDragged.emit(self.pos())
 
     def hoverEvent(self, ev):
         if self.movable:
