@@ -34,7 +34,6 @@ class AtlasViewer(QtGui.QWidget):
 
         self.view = VolumeSliceView()
         self.view.mouseHovered.connect(self.mouseHovered)
-        # self.view.mouseClicked.connect(self.mouseClicked)
         self.view.targetReleased.connect(self.targetReleased)
         self.splitter.addWidget(self.view)
         
@@ -144,31 +143,21 @@ class AtlasViewer(QtGui.QWidget):
 
         self.glView.show()
      
-    def targetReleased(self, item):
-        print '-- This is in Atlas Viewer'
-        print '-- ITEM!!!!!!!!'
-        print item
-     
-    # mouse_point[0] contains the Point object.
-    # mouse_point[1] contains the structure id at Point
-    # TODO: This is not needed anymore. 
-    # def mouseClicked(self, mouse_point):
-    #     point, to_clipboard = self.getCcfPoint(mouse_point)
-    #     self.pointLabel.setText(point)
-    #     self.view.target.setVisible(True)
-    #     self.view.target.setPos(self.view.view2.mapSceneToView(mouse_point[0].scenePos()))
-    #     self.view.clipboard.setText(json.dumps(self.coordinateCtrl.location))
-    #     self.view.w2.viewport().repaint()  # repaint right away to avoid having truncated cell/target labels
+    def targetReleased(self, target): 
+        point_label = self.getCcfPoint(target)
+        self.pointLabel.setText(point_label)
 
     # Get CCF point coordinate and Structure id
-    # Returns two strings. One used for display in a label and the other to put in the clipboard
+    # Returns one string used for display a label and structure id
+    # This function also saves the state of the viewer in self.coordinateCtrl.location
     # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right
-    def getCcfPoint(self, mouse_point):  # TODO: get text in json format
+    def getCcfPoint(self, target): 
 
+        str_id = self.view.img2.labelData[int(target.pos()[0]), int(target.pos()[1])]
         axis = self.displayCtrl.params['Orientation']
 
         # find real lims id
-        lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == mouse_point[1]).next()
+        lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == str_id).next()
         
         # compute the 4x4 transform matrix
         a = self.scale_point_to_CCF(self.view.line_roi.origin)
@@ -180,7 +169,7 @@ class AtlasViewer(QtGui.QWidget):
         # Find what the mouse point position is relative to the coordinate
         ab_length = np.linalg.norm(self.view.line_roi.ab_vector)
         ac_length = np.linalg.norm(self.view.line_roi.ac_vector)        
-        p = (mouse_point[0].pos().x()/ac_length, mouse_point[0].pos().y()/ab_length)
+        p = (target.pos()[0]/ac_length, target.pos()[1]/ab_length)
         
         ccf_location = np.dot(M0i, [p[1], p[0], 0, 1]) # use the inverse transform matrix and the mouse point
         
@@ -191,24 +180,21 @@ class AtlasViewer(QtGui.QWidget):
 
         if axis == 'right':
             point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
-            clipboard_text = str(p1) + ";" + str(p2) + ";" + str(p3) + ";" + str(lims_str_id)
-            self.coordinateCtrl.location["slice_specimen"]['cells'][123] = {"name": ".O1", "ccf_coordinate": [p1, p2, p3], "structure_id": str(lims_str_id)}
+            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p1, p2, p3], "structure_id": str(lims_str_id)} 
         elif axis == 'anterior':
             point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
-            clipboard_text = str(p3) + ";" + str(p2) + ";" + str(p1) + ";" + str(lims_str_id)
+            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p3, p2, p1], "structure_id": str(lims_str_id)} 
         elif axis == 'dorsal':
             point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
-            clipboard_text = str(p2) + ";" + str(p3) + ";" + str(p1) + ";" + str(lims_str_id)
+            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p2, p3, p1], "structure_id": str(lims_str_id)} 
         else:
             point = 'N/A'
-            clipboard_text = 'NULL'
 
         # Convert matrix transform to a LIMS dictionary 
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
         self.coordinateCtrl.location["slice_specimen"]["transform"] = ob
-        clipboard_text = "{};{}".format(clipboard_text, ob)
 
-        return point, clipboard_text
+        return point
     
     def scale_point_to_CCF(self, point):
         """
@@ -294,27 +280,15 @@ class AtlasViewer(QtGui.QWidget):
                 
                 self.view.set_cell_cluster(location["slice_specimen"]["cells"])
                 
-                # cell = location["slice_specimen"]["cells"].itervalues().next()  # Only handling one cell for now
-                # x = float(cell['ccf_coordinate'][0])
-                # y = float(cell['ccf_coordinate'][1])
-                # z = float(cell['ccf_coordinate'][2])
-                # cell_name = cell['name']  # TODO: make sure to validate...
-                
                 if transform:
                     self.view.set_cell_cluster_positions(transform=transform, vxsize=vxsize)
-                    # target_p1, target_p2 = self.get_target_position([x, y, z, 1], M1, ccf_ab_vector, ccf_ac_vector, vxsize)
                 else:
-                    self.view.set_cell_cluster_positions()
                     # No transform given, place cell ignoring lineROI angles
-                    translated_x = (self.view.atlas.shape[1] - (x/vxsize)) * self.view.scale[0]   # TODO: where to set ROI if more than one cell is available? Is this case valid?
-                    # translated_y = (self.view.atlas.shape[2] - (y/vxsize)) * self.view.scale[0] 
-                    # translated_z = (self.view.atlas.shape[0] - (z/vxsize)) * self.view.scale[0] 
-                    roi_origin = (translated_x, 0.0)
+                    self.view.set_cell_cluster_positions(vxsize=vxsize)
+                    roi_origin = ((self.view.atlas.shape[1]/2) * self.view.scale[1], 0.0)
                     to_size = (self.view.atlas.shape[2] * self.view.scale[1], 0.0) 
                     to_ab_angle = 90
                     to_ac_angle = 0
-                    # target_p1 = translated_z 
-                    # target_p2 = translated_y
 
                 self.setPlane(pg.Point(roi_origin[0], roi_origin[1]), pg.Point(to_size), to_ab_angle, to_ac_angle)
                 return
@@ -352,7 +326,7 @@ class AtlasViewer(QtGui.QWidget):
         
     def copySubmitted(self):
         # Set coordinateCtrl location
-        transform = self.get_plane_transform()  # TODO: Need to get location from coordinateCtrl in order to get all json( including cells 
+        transform = self.get_plane_transform() 
         
         self.coordinateCtrl.set_transform(transform)
         
@@ -651,7 +625,6 @@ class LabelTree(QtGui.QWidget):
 class VolumeSliceView(QtGui.QWidget):
     mouseHovered = QtCore.Signal(object)
     sigDragged = QtCore.Signal(object)
-    # mouseClicked = QtCore.Signal(object)
     targetReleased = QtCore.Signal(object)
 
     def __init__(self, parent=None):
@@ -682,7 +655,6 @@ class VolumeSliceView(QtGui.QWidget):
         self.img2 = LabelImageItem()
         self.img1.mouseHovered.connect(self.mouseHovered)
         self.img2.mouseHovered.connect(self.mouseHovered)
-        # self.img2.mouseClicked.connect(self.mouseClicked)
         self.view1.addItem(self.img1)
         self.view2.addItem(self.img2)
 
@@ -747,39 +719,39 @@ class VolumeSliceView(QtGui.QWidget):
         for key, value in cells.items():
             
             t = Target()
+            t.lims_id = key
             t.setLabel(value['name'])
             t.setCoordinate(value['ccf_coordinate'])
             t.setZValue(5000)
-            t.setParentItem(self.img2)
             t.sigDragged.connect(self.targetDragged)
-            self.view2.addItem(t)
-            # t.setVisible(False)
+            self.img2.addToGroup(t)
             self.cell_cluster.append(t)
 
     def targetDragged(self, item):
-        # Continue from here... Maybe I need to add another signal here in order to access AtlasViewer class. Or maybe I could do something like
-        #   updateSlice in this class...
-        # print '-- target Dragged'
-        # 
-        # print '-- item'
-        # print item
-        
         self.w2.viewport().repaint()
         self.targetReleased.emit(item)
     
-    def set_cell_cluster_positions(self, transform=None, vxsize=None):  # TODO: figure out how to get vxsize without passing as argument
+    def set_cell_cluster_positions(self, transform=None, vxsize=None):
         if not self.cell_cluster:
             return
         
-        # Get transform matrix
-        M1, M1i = points_to_aff.lims_obj_to_aff(transform)
-        # Get origin, and vectors in ccf coordinates
-        ccf_origin, ccf_ab_vector, ccf_ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
-        
-        for cell in self.cell_cluster:
-            coords = cell.ccf_coordinate + [1]  # Need to add a 1 for matrix to work
-            pos = self.get_target_position(coords, M1, ccf_ab_vector, ccf_ac_vector, vxsize)
-            cell.setTarget(pos)
+        if transform:
+            # Get transform matrix
+            M1, M1i = points_to_aff.lims_obj_to_aff(transform)
+            # Get origin, and vectors in ccf coordinates
+            ccf_origin, ccf_ab_vector, ccf_ac_vector = points_to_aff.aff_to_origin_and_vectors(M1i)
+            
+            for cell in self.cell_cluster:
+                coords = cell.ccf_coordinate + [1]  # Need to add a 1 for matrix to work
+                pos = self.get_target_position(coords, M1, ccf_ab_vector, ccf_ac_vector, vxsize)
+                cell.setPos(pos[0], pos[1])
+        else:
+            # No transform given
+            for cell in self.cell_cluster:
+                translated_x = (self.atlas.shape[1] - (cell.ccf_coordinate[0]/vxsize))# * self.scale[0] 
+                translated_y = (self.atlas.shape[2] - (cell.ccf_coordinate[1]/vxsize))# * self.scale[0] 
+                translated_z = (self.atlas.shape[0] - (cell.ccf_coordinate[2]/vxsize))# * self.scale[0]  
+                cell.setPos(translated_z, translated_y)  # This will only work when using 'right' orientation
 
     def get_target_position(self, ccf_location, M, ab_vector, ac_vector, vxsize):
         """
@@ -787,8 +759,8 @@ class VolumeSliceView(QtGui.QWidget):
         """
         img_location = np.dot(M, ccf_location)
         
-        p1 = (np.linalg.norm(ac_vector) / vxsize * img_location[1]) * self.scale[0]
-        p2 = (np.linalg.norm(ab_vector) / vxsize * img_location[0]) * self.scale[0]
+        p1 = (np.linalg.norm(ac_vector) / vxsize * img_location[1])
+        p2 = (np.linalg.norm(ab_vector) / vxsize * img_location[0])
         
         return p1, p2
     
@@ -853,7 +825,6 @@ class VolumeSliceView(QtGui.QWidget):
         
         self.img2.setData(atlas, label, scale=self.scale)
         self.view2.autoRange(items=[self.img2.atlasImg])
-        # self.target.setVisible(False)  # If this line is commented out, then the Target will stay in place...
         self.w1.viewport().repaint() # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
         
@@ -933,12 +904,10 @@ class VolumeSliceView(QtGui.QWidget):
 class LabelImageItem(QtGui.QGraphicsItemGroup):
     class SignalProxy(QtCore.QObject):
         mouseHovered = QtCore.Signal(object)  # id
-        # mouseClicked = QtCore.Signal(object)  # id
 
     def __init__(self):
         self._sigprox = LabelImageItem.SignalProxy()
         self.mouseHovered = self._sigprox.mouseHovered
-        # self.mouseClicked = self._sigprox.mouseClicked
 
         QtGui.QGraphicsItemGroup.__init__(self)
         self.atlasImg = pg.ImageItem(levels=[0,1])
@@ -979,16 +948,10 @@ class LabelImageItem(QtGui.QGraphicsItemGroup):
             return
 
         try:
-            print '-- HOVER'
-            print event.pos()
             id = self.labelData[int(event.pos().x()), int(event.pos().y())]
         except IndexError, AttributeError:
             return
         self.mouseHovered.emit(id)
-
-    # def mouseClickEvent(self, event):
-    #     id = self.labelData[int(event.pos().x()), int(event.pos().y())]
-    #     self.mouseClicked.emit([event, id])
 
     def boundingRect(self):
         return self.labelImg.boundingRect()
@@ -1164,6 +1127,7 @@ class Target(pg.GraphicsObject):
         self.label = "N/A"
         self.showLabel = False
         self.ccf_coordinate = (0, 0, 0)
+        self.lims_id = 0
         
     def setLabel(self, l):
         if not l:
@@ -1176,10 +1140,6 @@ class Target(pg.GraphicsObject):
             self.ccf_coordinate = (0, 0, 0)
         else:
             self.ccf_coordinate = coords
-
-    def setTarget(self, pos, setVisible=True):
-        self.setPos(pos[0], pos[1])
-        self.setVisible(setVisible)
 
     def boundingRect(self):
         w = self.pixelLength(pg.Point(1, 0))
@@ -1230,17 +1190,7 @@ class Target(pg.GraphicsObject):
             self.setPos(self.cursorOffset + self.mapToParent(ev.pos()))
             if ev.isFinish():
                 self.moving = False
-                print '-- Drag event'
-                print self.pos().x()
-                print self.pos().y()
-                print '-- Event pos'
-                print ev.pos()
-                print ev.scenePos()
-                print ev.screenPos()
-                print self.mapToScene(self.pos())
-                print self.mapToParent(self.pos())
-                print self.parentItem()
-                self.sigDragged.emit(self.pos())
+                self.sigDragged.emit(self)
 
     def hoverEvent(self, ev):
         if self.movable:
