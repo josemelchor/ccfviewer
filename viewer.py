@@ -63,6 +63,7 @@ class AtlasViewer(QtGui.QWidget):
         self.coordinateCtrl.displayLabelsSubmitted.connect(self.displayLabelsSubmitted)
         self.coordinateCtrl.toggleSubmitted.connect(self.toggleSubmitted)
         self.coordinateCtrl.copySubmitted.connect(self.copySubmitted)
+        self.coordinateCtrl.resetSubmitted.connect(self.resetSubmitted)
         self.ctrlLayout.addWidget(self.coordinateCtrl)
 
     def setLabels(self, label):
@@ -146,6 +147,7 @@ class AtlasViewer(QtGui.QWidget):
     def targetReleased(self, target): 
         point_label = self.getCcfPoint(target)
         self.pointLabel.setText(point_label)
+        self.copySubmitted()
 
     # Get CCF point coordinate and Structure id
     # Returns one string used for display a label and structure id
@@ -274,6 +276,7 @@ class AtlasViewer(QtGui.QWidget):
             else:
                 transform = None
                 if not location["slice_specimen"]["cells"]:
+                    self.view.clear_previous_cells()
                     return
 
             if location["slice_specimen"]["cells"]:
@@ -332,6 +335,9 @@ class AtlasViewer(QtGui.QWidget):
         
         # Copy location to clipboard
         self.view.clipboard.setText(json.dumps(self.coordinateCtrl.location))
+        
+    def resetSubmitted(self):
+        self.view.clear_previous_cells()
     
     def get_plane_transform(self):
         # compute the 4x4 transform matrix
@@ -346,13 +352,17 @@ class AtlasViewer(QtGui.QWidget):
         return ob
 
     def toggleSubmitted(self, item):
-        self.view.hide_cell(item)
+        if item.type() == 5:
+            self.view.hide_all_cells(item)
+        else:
+            self.view.hide_cell(item)
 
 
 class CoordinatesCtrl(QtGui.QWidget):
     coordinateSubmitted = QtCore.Signal()
     displayLabelsSubmitted = QtCore.Signal()
     copySubmitted = QtCore.Signal()
+    resetSubmitted = QtCore.Signal()
     toggleSubmitted = QtCore.Signal(object)
     
     def __init__(self, parent=None):
@@ -363,29 +373,31 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         self.cell_tree = QtGui.QTreeWidget(self)
-        self.layout.addWidget(self.cell_tree, 0, 0, 1, 3)
+        self.layout.addWidget(self.cell_tree, 0, 0, 1, 4)
         self.cell_tree.header().setResizeMode(QtGui.QHeaderView.ResizeToContents)
-        self.cell_tree.headerItem().setText(0, "Name")
-        self.cell_tree.headerItem().setText(1, "Structure")
-        self.cell_tree.headerItem().setText(2, "Position")
+        self.cell_tree.headerItem().setText(0, "Specimen Name")
         self.checked = set()
         self.cell_tree.itemChanged.connect(self.itemChange)
         
         self.line = QtGui.QLineEdit(self)
         self.line.returnPressed.connect(self.set_coordinate)
-        self.layout.addWidget(self.line, 1, 0, 1, 3)
+        self.layout.addWidget(self.line, 1, 0, 1, 4)
 
-        self.btn = QtGui.QPushButton('Set Coordinate', self)
+        self.btn = QtGui.QPushButton('Set', self)
         self.layout.addWidget(self.btn, 2, 0)
         self.btn.clicked.connect(self.set_coordinate)
         
-        self.labels_btn = QtGui.QPushButton('Display Labels', self)
+        self.labels_btn = QtGui.QPushButton('Labels', self)
         self.layout.addWidget(self.labels_btn, 2, 1)
         self.labels_btn.clicked.connect(self.display_labels)
         
-        self.copy_btn = QtGui.QPushButton('copy', self)
+        self.copy_btn = QtGui.QPushButton('Copy', self)
         self.layout.addWidget(self.copy_btn, 2, 2)
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
+        
+        self.reset_btn = QtGui.QPushButton('Reset', self)
+        self.layout.addWidget(self.reset_btn, 2, 3)
+        self.reset_btn.clicked.connect(self.reset_cell_panel)
         
         self.location = {"slice_specimen": {"lims_id": None,
                                             "name": None,
@@ -394,23 +406,30 @@ class CoordinatesCtrl(QtGui.QWidget):
 
     def itemChange(self, item):
         self.toggleSubmitted.emit(item)
+        
+    def reset_cell_panel(self):
+        self.cell_tree.clear()
+        self.location = {"slice_specimen": {"lims_id": None,
+                                            "name": None,
+                                            "transform": {},
+                                            "cells": {}}}
+        self.line.clear()
+        self.resetSubmitted.emit()
 
     def set_cell_tree(self):
 
-        sp_slice = QtGui.QTreeWidgetItem([self.location['slice_specimen']['name'], '', ''])
+        sp_slice = QtGui.QTreeWidgetItem([self.location['slice_specimen']['name']], 5) # Setting type=5 to identify root specimen (aka 'slice specimen')
+        sp_slice.setFlags(sp_slice.flags() | QtCore.Qt.ItemIsUserCheckable)
+        sp_slice.setCheckState(0, QtCore.Qt.Checked)
         self.cell_tree.clear()
         self.cell_tree.addTopLevelItem(sp_slice)
-
+        cell_list = []
+        
         for key, cell in self.location['slice_specimen']['cells'].items():
-            list1 = cell['ccf_coordinate']
-            coord = ', '.join(str(e) for e in list1)
-
-            if cell['structure_id'] is None:
-                structure = 'N/A'
-            else:
-                structure = str(cell['structure_id'])
-
-            c = QtGui.QTreeWidgetItem([cell['name'], structure, coord])
+            cell_list.append(cell['name'])
+            
+        for cell in sorted(cell_list):
+            c = QtGui.QTreeWidgetItem([cell])
             c.setFlags(c.flags() | QtCore.Qt.ItemIsUserCheckable)
             c.setCheckState(0, QtCore.Qt.Checked)
             sp_slice.addChild(c)
@@ -433,7 +452,7 @@ class CoordinatesCtrl(QtGui.QWidget):
         
     def set_transform(self, transform):
         self.location["slice_specimen"]["transform"] = transform
-        print self.location
+        # print self.location
         
     def set_cells(self, cells):
         if cells:
@@ -708,14 +727,7 @@ class VolumeSliceView(QtGui.QWidget):
         self.line_roi.setPos((self.line_roi.pos().x() - .0001, self.line_roi.pos().y()))
         
     def set_cell_cluster(self, cells):
-        if self.cell_cluster:
-            # Remove any previous cells
-            for item in self.cell_cluster:
-                self.view2.removeItem(item)
-
-            del self.cell_cluster[:]  
-        
-        self.cell_cluster = []
+        self.clear_previous_cells()
         for key, value in cells.items():
             
             t = Target()
@@ -726,6 +738,16 @@ class VolumeSliceView(QtGui.QWidget):
             t.sigDragged.connect(self.targetDragged)
             self.img2.addToGroup(t)
             self.cell_cluster.append(t)
+            
+    def clear_previous_cells(self):
+        if self.cell_cluster:
+            # Remove any previous cells
+            for item in self.cell_cluster:
+                self.view2.removeItem(item)
+
+            del self.cell_cluster[:]  
+        
+        self.cell_cluster = []
 
     def targetDragged(self, item):
         self.w2.viewport().repaint()
@@ -770,12 +792,20 @@ class VolumeSliceView(QtGui.QWidget):
         
         for cell in self.cell_cluster:
             cell.showLabel = not cell.showLabel
+    
+    def hide_all_cells(self, item): 
+        count = item.childCount()
+
+        for i in range(count):
+            cell = item.child(i)
+            cell.setCheckState(0, item.checkState(0))
+            self.hide_cell(cell)
 
     def hide_cell(self, item):
 
         if not self.cell_cluster:
             return
-
+        
         for cell in self.cell_cluster:
             if item.text(0) == cell.label:
                 cell.setVisible(item.checkState(0) == QtCore.Qt.Checked)
@@ -827,6 +857,7 @@ class VolumeSliceView(QtGui.QWidget):
         self.view2.autoRange(items=[self.img2.atlasImg])
         self.w1.viewport().repaint() # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
+        # TODO: Need to update clipboard here too..
         
     def sliderRotation(self):
         rotation = self.slider.value()
