@@ -35,6 +35,7 @@ class AtlasViewer(QtGui.QWidget):
         self.view = VolumeSliceView()
         self.view.mouseHovered.connect(self.mouseHovered)
         self.view.targetReleased.connect(self.targetReleased)
+        self.view.copyToClipboard.connect(self.copySubmitted)
         self.splitter.addWidget(self.view)
         
         self.statusLabel = QtGui.QLabel()
@@ -645,6 +646,7 @@ class VolumeSliceView(QtGui.QWidget):
     mouseHovered = QtCore.Signal(object)
     sigDragged = QtCore.Signal(object)
     targetReleased = QtCore.Signal(object)
+    copyToClipboard = QtCore.Signal()
 
     def __init__(self, parent=None):
         self.atlas = None
@@ -857,7 +859,7 @@ class VolumeSliceView(QtGui.QWidget):
         self.view2.autoRange(items=[self.img2.atlasImg])
         self.w1.viewport().repaint() # repaint immediately to avoid processing more mouse events before next repaint
         self.w2.viewport().repaint()
-        # TODO: Need to update clipboard here too..
+        self.copyToClipboard.emit()
         
     def sliderRotation(self):
         rotation = self.slider.value()
@@ -1203,8 +1205,7 @@ class Target(pg.GraphicsObject):
             pos = p.transform().map(QtCore.QPointF(0, 0)) + 20 * QtCore.QPointF(np.cos(angle), -np.sin(angle))
             p.resetTransform()
             p.drawText(QtCore.QRectF(pos.x()-10, pos.y()-10, 250, 20), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, self.label)
-        
-    # TODO: How to avoid labels not moved with target???    
+          
     def mouseDragEvent(self, ev):
         if not self.movable:
             return
