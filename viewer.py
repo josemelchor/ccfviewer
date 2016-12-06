@@ -152,7 +152,6 @@ class AtlasViewer(QtGui.QWidget):
 
     # Get CCF point coordinate and Structure id
     # Returns one string used for display a label and structure id
-    # This function also saves the state of the viewer in self.coordinateCtrl.location
     # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right
     def getCcfPoint(self, target): 
 
@@ -162,42 +161,40 @@ class AtlasViewer(QtGui.QWidget):
         # find real lims id
         lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == str_id).next()
         
+        M0, M0i = self.get_affine_matrices()
+
+        # Find what the mouse point position is relative to the coordinate
+        target_pos = self.get_point_in_CCF(target, M0i)
+
+        if axis == 'right':
+            point = "x: " + str(target_pos[0]) + " y: " + str(target_pos[1]) + " z: " + str(target_pos[2]) + " StructureID: " + str(lims_str_id)
+        elif axis == 'anterior':
+            point = "x: " + str(target_pos[2]) + " y: " + str(target_pos[1]) + " z: " + str(target_pos[0]) + " StructureID: " + str(lims_str_id)
+        elif axis == 'dorsal':
+            point = "x: " + str(target_pos[1]) + " y: " + str(target_pos[2]) + " z: " + str(target_pos[0]) + " StructureID: " + str(lims_str_id)
+        else:
+            point = 'N/A'
+
+        return point
+    
+    def get_affine_matrices(self):
         # compute the 4x4 transform matrix
         a = self.scale_point_to_CCF(self.view.line_roi.origin)
         ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
         ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
         
-        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
-
-        # Find what the mouse point position is relative to the coordinate
+        return points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
+    
+    # Find what the mouse point position is relative to the coordinate
+    def get_point_in_CCF(self, target_cell, M0i):
         ab_length = np.linalg.norm(self.view.line_roi.ab_vector)
         ac_length = np.linalg.norm(self.view.line_roi.ac_vector)        
-        p = (target.pos()[0]/ac_length, target.pos()[1]/ab_length)
+        p = (target_cell.pos()[0]/ac_length, target_cell.pos()[1]/ab_length)
         
         ccf_location = np.dot(M0i, [p[1], p[0], 0, 1]) # use the inverse transform matrix and the mouse point
         
         # These should be x, y, z
-        p1 = float(ccf_location[0])
-        p2 = float(ccf_location[1])
-        p3 = float(ccf_location[2])
-
-        if axis == 'right':
-            point = "x: " + str(p1) + " y: " + str(p2) + " z: " + str(p3) + " StructureID: " + str(lims_str_id)
-            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p1, p2, p3], "structure_id": str(lims_str_id)} 
-        elif axis == 'anterior':
-            point = "x: " + str(p3) + " y: " + str(p2) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
-            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p3, p2, p1], "structure_id": str(lims_str_id)} 
-        elif axis == 'dorsal':
-            point = "x: " + str(p2) + " y: " + str(p3) + " z: " + str(p1) + " StructureID: " + str(lims_str_id)
-            self.coordinateCtrl.location["slice_specimen"]['cells'][target.lims_id] = {"name": str(target.label), "ccf_coordinate": [p2, p3, p1], "structure_id": str(lims_str_id)} 
-        else:
-            point = 'N/A'
-
-        # Convert matrix transform to a LIMS dictionary 
-        ob = points_to_aff.aff_to_lims_obj(M0, M0i)
-        self.coordinateCtrl.location["slice_specimen"]["transform"] = ob
-
-        return point
+        return float(ccf_location[0]), float(ccf_location[1]), float(ccf_location[2])
     
     def scale_point_to_CCF(self, point):
         """
@@ -305,8 +302,8 @@ class AtlasViewer(QtGui.QWidget):
             displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
 
     def setPlane(self, pos, size, ab_angle, ac_angle):
+        self.view.slider.setValue(int(float(str(ac_angle))))  # NOTE: This is ridiculous, casting ac_angle to an int doesn't work unless I do this
         self.view.line_roi.setAngle(ab_angle)
-        self.view.slider.setValue(ac_angle)
         self.view.line_roi.setPos(pos)
         self.view.line_roi.setSize(size)
 
@@ -330,28 +327,51 @@ class AtlasViewer(QtGui.QWidget):
         
     def copySubmitted(self):
         # Set coordinateCtrl location
-        transform = self.get_plane_transform() 
-        
+        transform = self.get_plane_transform()   
         self.coordinateCtrl.set_transform(transform)
+        
+        # Set cell locations
+        self.set_cells()
         
         # Copy location to clipboard
         self.view.clipboard.setText(json.dumps(self.coordinateCtrl.location))
+     
+    # Saves current state of the targets (aka cells) in self.coordinateCtrl.location
+    # PIR orientation where x axis = Anterior-to-Posterior, y axis = Superior-to-Inferior and z axis = Left-to-Right   
+    def set_cells(self):
+        if self.view.cell_cluster:
+                
+            M0, M0i = self.get_affine_matrices()
+            
+            for cell in self.view.cell_cluster:
+        
+                str_id = self.view.img2.labelData[int(cell.pos()[0]), int(cell.pos()[1])]
+                axis = self.displayCtrl.params['Orientation']
+        
+                # find real lims id
+                lims_str_id = (key for key, value in self.label._info[-1]['ai_ontology_map'] if value == str_id).next()
+        
+                # Find what the mouse point position is relative to the coordinate
+                target_pos = self.get_point_in_CCF(cell, M0i)
+        
+                if axis == 'right':
+                    self.coordinateCtrl.location["slice_specimen"]['cells'][cell.lims_id] = {"name": str(cell.label), "ccf_coordinate": [target_pos[0], target_pos[1], target_pos[2]], "structure_id": str(lims_str_id)} 
+                elif axis == 'anterior':
+                    self.coordinateCtrl.location["slice_specimen"]['cells'][cell.lims_id] = {"name": str(cell.label), "ccf_coordinate": [target_pos[2], target_pos[1], target_pos[0]], "structure_id": str(lims_str_id)} 
+                elif axis == 'dorsal':
+                    self.coordinateCtrl.location["slice_specimen"]['cells'][cell.lims_id] = {"name": str(cell.label), "ccf_coordinate": [target_pos[1], target_pos[2], target_pos[0]], "structure_id": str(lims_str_id)} 
+                else:
+                    print 'Error: unknown orientation' 
         
     def resetSubmitted(self):
         self.view.clear_previous_cells()
     
     def get_plane_transform(self):
-        # compute the 4x4 transform matrix
-        a = self.scale_point_to_CCF(self.view.line_roi.origin)
-        ab = self.scale_vector_to_PIR(self.view.line_roi.ab_vector)
-        ac = self.scale_vector_to_PIR(self.view.line_roi.ac_vector)
-        
-        M0, M0i = points_to_aff.points_to_aff(a, np.array(ab), np.array(ac))
-
+        M0, M0i = self.get_affine_matrices()
         # Convert matrix transform to a LIMS dictionary
         ob = points_to_aff.aff_to_lims_obj(M0, M0i)
         return ob
-
+    
     def toggleSubmitted(self, item):
         if item.type() == 5:
             self.view.hide_all_cells(item)
@@ -418,6 +438,8 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.resetSubmitted.emit()
 
     def set_cell_tree(self):
+        if not self.location['slice_specimen']['name']:  # This would occur when setting plane only...
+            return
 
         sp_slice = QtGui.QTreeWidgetItem([self.location['slice_specimen']['name']], 5) # Setting type=5 to identify root specimen (aka 'slice specimen')
         sp_slice.setFlags(sp_slice.flags() | QtCore.Qt.ItemIsUserCheckable)
@@ -768,7 +790,8 @@ class VolumeSliceView(QtGui.QWidget):
             for cell in self.cell_cluster:
                 coords = cell.ccf_coordinate + [1]  # Need to add a 1 for matrix to work
                 pos = self.get_target_position(coords, M1, ccf_ab_vector, ccf_ac_vector, vxsize)
-                cell.setPos(pos[0], pos[1])
+                cell.setPos(pos[0], pos[1])  
+
         else:
             # No transform given
             for cell in self.cell_cluster:
