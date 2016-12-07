@@ -302,7 +302,7 @@ class AtlasViewer(QtGui.QWidget):
             displayError('Error: %s Check value: %s' % (sys.exc_info()[0], sys.exc_info()[1]))
 
     def setPlane(self, pos, size, ab_angle, ac_angle):
-        self.view.slider.setValue(int(float(str(ac_angle))))  # NOTE: This is ridiculous, casting ac_angle to an int doesn't work unless I do this
+        self.view.slider.setValue(int(float(str(ac_angle))))  # NOTE: why is this happening?, casting ac_angle <type numpy float64> to an int doesn't work unless I do this
         self.view.line_roi.setAngle(ab_angle)
         self.view.line_roi.setPos(pos)
         self.view.line_roi.setSize(size)
@@ -345,7 +345,7 @@ class AtlasViewer(QtGui.QWidget):
             
             for cell in self.view.cell_cluster:
         
-                str_id = self.view.img2.labelData[int(cell.pos()[0]), int(cell.pos()[1])]
+                str_id = self.view.img2.labelData[int(cell.pos()[0]) - 1, int(cell.pos()[1]) - 1]
                 axis = self.displayCtrl.params['Orientation']
         
                 # find real lims id
