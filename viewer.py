@@ -365,6 +365,7 @@ class AtlasViewer(QtGui.QWidget):
         
     def resetSubmitted(self):
         self.view.clear_previous_cells()
+        self.view.w2.viewport().repaint()
     
     def get_plane_transform(self):
         M0, M0i = self.get_affine_matrices()
@@ -404,19 +405,23 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.line.returnPressed.connect(self.set_coordinate)
         self.layout.addWidget(self.line, 1, 0, 1, 4)
 
-        self.btn = QtGui.QPushButton('Set', self)
+        self.btn = QtGui.QPushButton(QtGui.QIcon('images/set.png'), '', self)
+        self.btn.setToolTip('Set Coordinates')
         self.layout.addWidget(self.btn, 2, 0)
         self.btn.clicked.connect(self.set_coordinate)
         
-        self.labels_btn = QtGui.QPushButton('Labels', self)
+        self.labels_btn = QtGui.QPushButton(QtGui.QIcon('images/review.png'), '', self)
+        self.labels_btn.setToolTip('Display/Hide Labels')
         self.layout.addWidget(self.labels_btn, 2, 1)
         self.labels_btn.clicked.connect(self.display_labels)
         
-        self.copy_btn = QtGui.QPushButton('Copy', self)
+        self.copy_btn = QtGui.QPushButton(QtGui.QIcon('images/copy.png'), '', self)
+        self.copy_btn.setToolTip('Copy')
         self.layout.addWidget(self.copy_btn, 2, 2)
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         
-        self.reset_btn = QtGui.QPushButton('Reset', self)
+        self.reset_btn = QtGui.QPushButton(QtGui.QIcon('images/reset.png'), '', self)
+        self.reset_btn.setToolTip('Reset')
         self.layout.addWidget(self.reset_btn, 2, 3)
         self.reset_btn.clicked.connect(self.reset_cell_panel)
         
@@ -1030,7 +1035,7 @@ class RulerROI(pg.ROI):
     def __init__(self, pos, size, **args):
         pg.ROI.__init__(self, pos, size, **args)
         self.ab_vector = (0, 0, 0)  # This is the vector pointing up/down from the origin
-        self.ac_vector = (0, 0, 0)  # This is the vector pointing across form the orign
+        self.ac_vector = (0, 0, 0)  # This is the vector pointing across form the origin
         self.origin = (0, 0, 0)     
         self.ab_angle = 90  # angle on the ab_vector
         self.ac_angle = 0   # angle of the ac_vector 
@@ -1039,7 +1044,7 @@ class RulerROI(pg.ROI):
         self.addTranslateHandle([0.5, 0.5])
         self.addFreeHandle([0, 1], [0, 0])  
         self.addFreeHandle([0, 0], [0, 0])
-        self.newRoi = pg.ROI((0, 0), [1, 5], parent=self, pen=pg.mkPen('w', style=QtCore.Qt.DotLine))
+        self.newRoi = pg.ROI((0, 0), [1, 5], parent=self, pen=pg.mkPen('#7c1a1a'))
 
     def paint(self, p, *args):
         pg.ROI.paint(self, p, *args)
