@@ -397,11 +397,13 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.cell_tree = QtGui.QTreeWidget(self)
         self.layout.addWidget(self.cell_tree, 0, 0, 1, 4)
         self.cell_tree.header().setResizeMode(QtGui.QHeaderView.ResizeToContents)
+        self.cell_tree.header().setStretchLastSection(False)
         self.cell_tree.headerItem().setText(0, "Specimen Name")
         self.checked = set()
         self.cell_tree.itemChanged.connect(self.itemChange)
         
         self.line = QtGui.QLineEdit(self)
+        self.line.setPlaceholderText('Enter coordinate string here...')
         self.line.returnPressed.connect(self.set_coordinate)
         self.layout.addWidget(self.line, 1, 0, 1, 4)
 
