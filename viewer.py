@@ -407,22 +407,23 @@ class CoordinatesCtrl(QtGui.QWidget):
         self.line.returnPressed.connect(self.set_coordinate)
         self.layout.addWidget(self.line, 1, 0, 1, 4)
 
-        self.btn = QtGui.QPushButton(QtGui.QIcon('images/set.png'), '', self)
+        ipath = os.path.dirname(os.path.realpath(__file__))
+        self.btn = QtGui.QPushButton(QtGui.QIcon(os.path.join(ipath, 'images/set.png')), '', self)
         self.btn.setToolTip('Set Coordinates')
         self.layout.addWidget(self.btn, 2, 0)
         self.btn.clicked.connect(self.set_coordinate)
         
-        self.labels_btn = QtGui.QPushButton(QtGui.QIcon('images/review.png'), '', self)
+        self.labels_btn = QtGui.QPushButton(QtGui.QIcon(os.path.join(ipath, 'images/review.png')), '', self)
         self.labels_btn.setToolTip('Display/Hide Labels')
         self.layout.addWidget(self.labels_btn, 2, 1)
         self.labels_btn.clicked.connect(self.display_labels)
         
-        self.copy_btn = QtGui.QPushButton(QtGui.QIcon('images/copy.png'), '', self)
+        self.copy_btn = QtGui.QPushButton(QtGui.QIcon(os.path.join(ipath,'images/copy.png')), '', self)
         self.copy_btn.setToolTip('Copy')
         self.layout.addWidget(self.copy_btn, 2, 2)
         self.copy_btn.clicked.connect(self.copy_to_clipboard)
         
-        self.reset_btn = QtGui.QPushButton(QtGui.QIcon('images/reset.png'), '', self)
+        self.reset_btn = QtGui.QPushButton(QtGui.QIcon(os.path.join(ipath,'images/reset.png')), '', self)
         self.reset_btn.setToolTip('Reset')
         self.layout.addWidget(self.reset_btn, 2, 3)
         self.reset_btn.clicked.connect(self.reset_cell_panel)
@@ -472,7 +473,7 @@ class CoordinatesCtrl(QtGui.QWidget):
             else:
                 displayError(errors)
         except ValueError:
-            displayError("Error Setting coordinate")
+            displayError("Error Setting coordinate. Make sure to enter valid JSON")
     
     def set_location(self, place):
         self.location["slice_specimen"]["lims_id"] = place["slice_specimen"]["lims_id"]
@@ -1403,10 +1404,7 @@ def writeFile(data, file):
     if dataDir != '' and not os.path.exists(dataDir):
         os.makedirs(dataDir)
 
-    if max(data.shape) > 200 and min(data.shape) > 200:
-        data.write(file, chunks=(200, 200, 200))
-    else:
-        data.write(file)
+    data.write(file)
 
 
 def displayError(error):
